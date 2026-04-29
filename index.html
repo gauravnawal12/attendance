@@ -1940,47 +1940,71 @@ function supStopScanner() {
  * @param {function} onQRFound  - Callback receiving decoded QR string
  */
 function initCameraScanner(videoId, canvasId, statusId, startBtnId, stopBtnId, onStream, onInterval, onQRFound) {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    showToast('⚠ Camera not supported on this device');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    document.getElementById(statusId).textContent = '❌ Camera not supported on this browser/device';
+    showToast('⚠ Camera not supported — try Chrome or Safari');
     return;
   }
 
-  navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
-  })
-  .then(stream => {
-    onStream(stream);
-    const video = document.getElementById(videoId);
-    video.srcObject = stream;
-    video.play();
+  // Try rear camera first; fall back to any camera if rear unavailable
+  const constraints = [
+    { video: { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+    { video: { facingMode: 'environment',            width: { ideal: 1280 }, height: { ideal: 720 } } },
+    { video: true } // last resort: any camera
+  ];
 
-    // Update UI
-    document.getElementById(startBtnId).style.display = 'none';
-    document.getElementById(stopBtnId).style.display  = 'flex';
-    const statusEl = document.getElementById(statusId);
-    statusEl.textContent = '🟢 Scanning — hold QR code steady';
-    statusEl.classList.add('ready');
+  function tryNext(idx) {
+    if (idx >= constraints.length) {
+      document.getElementById(statusId).textContent = '❌ Camera access denied — please allow permission';
+      showToast('⚠ Camera permission denied');
+      return;
+    }
+    navigator.mediaDevices.getUserMedia(constraints[idx])
+      .then(stream => {
+        onStream(stream);
+        const video = document.getElementById(videoId);
+        video.srcObject = stream;
+        video.setAttribute('playsinline', true); // iOS requires this attribute set
+        video.setAttribute('muted', true);
+        video.play().catch(() => {}); // suppress NotAllowedError on autoplay
 
-    // Poll every 250 ms for QR codes
-    const id = setInterval(() => {
-      const vid = document.getElementById(videoId);
-      if (!vid.videoWidth) return;
-      const cvs = document.getElementById(canvasId);
-      cvs.width  = vid.videoWidth;
-      cvs.height = vid.videoHeight;
-      const ctx = cvs.getContext('2d');
-      ctx.drawImage(vid, 0, 0);
-      const imageData = ctx.getImageData(0, 0, cvs.width, cvs.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
-      if (code) onQRFound(code.data);
-    }, 250);
+        // Update UI
+        document.getElementById(startBtnId).style.display = 'none';
+        document.getElementById(stopBtnId).style.display  = 'flex';
+        const statusEl = document.getElementById(statusId);
+        statusEl.textContent = '🟢 Scanning — hold QR code steady in the frame';
+        statusEl.classList.add('ready');
 
-    onInterval(id);
-  })
-  .catch(() => {
-    document.getElementById(statusId).textContent = '❌ Camera access denied — please allow permission';
-    showToast('⚠ Camera permission denied');
-  });
+        // Use a shared offscreen canvas for speed
+        const cvs = document.getElementById(canvasId);
+        const ctx = cvs.getContext('2d', { willReadFrequently: true });
+
+        // Poll every 120 ms for faster detection
+        const id = setInterval(() => {
+          const vid = document.getElementById(videoId);
+          if (!vid.videoWidth || vid.paused || vid.ended) return;
+
+          // Downscale to 640px wide for speed while keeping aspect ratio
+          const scale  = Math.min(1, 640 / vid.videoWidth);
+          const w      = Math.round(vid.videoWidth  * scale);
+          const h      = Math.round(vid.videoHeight * scale);
+          cvs.width    = w;
+          cvs.height   = h;
+          ctx.drawImage(vid, 0, 0, w, h);
+
+          const imageData = ctx.getImageData(0, 0, w, h);
+
+          // Try both inversion modes to handle dark/light QR codes
+          let code = jsQR(imageData.data, w, h, { inversionAttempts: 'attemptBoth' });
+          if (code) onQRFound(code.data);
+        }, 120);
+
+        onInterval(id);
+      })
+      .catch(() => tryNext(idx + 1)); // try next constraint on failure
+  }
+
+  tryNext(0);
 }
 
 /**
@@ -2015,9 +2039,9 @@ function stopCameraScanner(stream, intervalId, statusId, startBtnId, stopBtnId, 
  * @param {string} scannedBy - User ID of who scanned (guard | sup1 | sup2 | sup3)
  */
 function processScan(raw, scannedBy) {
-  // Debounce: ignore same QR within 3 seconds
+  // Debounce: ignore same QR within 4 seconds to prevent duplicate records
   const now = Date.now();
-  if (raw === lastScannedId && now - lastScanTime < 3000) return;
+  if (raw === lastScannedId && now - lastScanTime < 4000) return;
   lastScannedId = raw;
   lastScanTime  = now;
 
