@@ -1,0 +1,2868 @@
+<!DOCTYPE html>
+<!--
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║   HELIX INDUSTRIES — ATTENDANCE MANAGEMENT SYSTEM                   ║
+  ║   Version: 2.0                                                       ║
+  ║   Roles: Admin | Guard | Supervisor (×3)                            ║
+  ║   Features: QR Generation, QR Scanning, Daily/Monthly Reports       ║
+  ║   Export: XLSX (Excel) + CSV                                         ║
+  ║   Shift: 09:00–18:30 | Lunch: 30 min | Net: 9 hrs                   ║
+  ╚══════════════════════════════════════════════════════════════════════╝
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#f5f0e8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Helix Attend">
+<link rel="manifest" href="manifest.json">
+<title>Helix Attend — Helix Industries</title>
+
+<!-- QR Code generation library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<!-- QR Code scanning library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<!-- SheetJS for XLSX export -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Google Fonts: DM Serif Display (headings) + DM Sans (body) -->
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap" rel="stylesheet">
+
+<style>
+/* ══════════════════════════════════════════════════
+   DESIGN TOKENS — Helix Industries Pastel Palette
+   ══════════════════════════════════════════════════ */
+:root {
+  /* Core brand colours extracted from Helix logo */
+  --helix-navy:   #2d3b4a;   /* Logo dark slate */
+  --helix-gold:   #f5b800;   /* Logo golden yellow */
+  --helix-gold-d: #d4a000;   /* Deeper gold for hover */
+
+  /* Pastel background system */
+  --bg-page:      #f5f0e8;   /* Warm cream — main background */
+  --bg-card:      #fffdf8;   /* Near-white card surface */
+  --bg-elevated:  #fff9ee;   /* Slightly warm elevated surface */
+  --bg-sidebar:   #2d3b4a;   /* Navy sidebar/topbar */
+
+  /* Pastel accent fills (for badges, stat cards) */
+  --pastel-green:  #d4f0e2;
+  --pastel-amber:  #fef3c7;
+  --pastel-blue:   #dbeafe;
+  --pastel-rose:   #fce7f3;
+  --pastel-sky:    #e0f2fe;
+  --pastel-violet: #ede9fe;
+  --pastel-peach:  #ffedd5;
+
+  /* Semantic colours */
+  --col-in:     #059669;   /* Check-in green */
+  --col-out:    #dc2626;   /* Check-out red */
+  --col-break:  #d97706;   /* Break amber */
+  --col-absent: #6b7280;   /* Absent grey */
+  --col-accent: #f5b800;   /* Gold accent */
+
+  /* Typography */
+  --text-primary:   #1e2a35;
+  --text-secondary: #4b5e6e;
+  --text-muted:     #8fa3b0;
+
+  /* Structure */
+  --border:     rgba(45,59,74,0.12);
+  --radius-sm:  8px;
+  --radius-md:  14px;
+  --radius-lg:  20px;
+  --shadow-sm:  0 1px 4px rgba(45,59,74,0.08);
+  --shadow-md:  0 4px 20px rgba(45,59,74,0.10);
+  --shadow-lg:  0 8px 40px rgba(45,59,74,0.14);
+}
+
+/* ── RESET & BASE ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  height: 100%;
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+/* Subtle linen texture overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Crect width='4' height='4' fill='none'/%3E%3Ccircle cx='1' cy='1' r='0.5' fill='%232d3b4a' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ══════════════════════════════════════════════════
+   SCREEN SYSTEM
+   ══════════════════════════════════════════════════ */
+.screen { display: none; flex-direction: column; min-height: 100vh; position: relative; z-index: 1; }
+.screen.active { display: flex; }
+.page { display: none; }
+.page.active { display: block; }
+
+/* ══════════════════════════════════════════════════
+   LOGIN SCREEN
+   ══════════════════════════════════════════════════ */
+#loginScreen {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: linear-gradient(160deg, #f5f0e8 0%, #fef9ee 60%, #e8f0f5 100%);
+  min-height: 100vh;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  padding: 40px 36px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+  animation: slideUp 0.4s ease;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Helix Logo — SVG recreation of the geometric H mark */
+.helix-logo {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 32px;
+}
+
+.helix-logo-mark {
+  flex-shrink: 0;
+}
+
+.helix-logo-text-wrap { text-align: left; }
+
+.helix-logo-company {
+  font-family: 'DM Serif Display', serif;
+  font-size: 22px;
+  color: var(--helix-navy);
+  letter-spacing: 0.5px;
+  line-height: 1.1;
+}
+
+.helix-logo-tagline {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* Role selector tabs */
+.role-selector {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  background: var(--bg-page);
+  padding: 5px;
+  border-radius: var(--radius-md);
+  margin-bottom: 28px;
+}
+
+.role-btn {
+  padding: 9px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.role-btn.active {
+  background: var(--helix-navy);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Form elements */
+.field { margin-bottom: 18px; }
+
+.field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 7px;
+}
+
+.field input, .field select {
+  width: 100%;
+  padding: 13px 16px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  appearance: none;
+}
+
+.field input:focus, .field select:focus {
+  border-color: var(--helix-gold);
+  box-shadow: 0 0 0 3px rgba(245,184,0,0.15);
+  background: #fff;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 13px 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-full { width: 100%; }
+
+.btn-navy {
+  background: var(--helix-navy);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(45,59,74,0.25);
+}
+.btn-navy:hover { background: #3a4d60; transform: translateY(-1px); }
+.btn-navy:active { transform: translateY(0); }
+
+.btn-gold {
+  background: var(--helix-gold);
+  color: var(--helix-navy);
+  box-shadow: 0 2px 12px rgba(245,184,0,0.3);
+}
+.btn-gold:hover { background: var(--helix-gold-d); transform: translateY(-1px); }
+
+.btn-outline {
+  background: transparent;
+  border: 1.5px solid var(--border);
+  color: var(--text-secondary);
+}
+.btn-outline:hover { border-color: var(--helix-navy); color: var(--helix-navy); }
+
+.btn-danger {
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1.5px solid #fca5a5;
+}
+.btn-danger:hover { background: #fecaca; }
+
+.btn-sm { padding: 8px 14px; font-size: 12px; }
+.btn-xs { padding: 5px 10px; font-size: 11px; }
+
+.error-text { color: #dc2626; font-size: 13px; margin-top: 10px; min-height: 18px; }
+
+/* Credentials hint */
+.creds-hint {
+  margin-top: 20px;
+  background: var(--pastel-blue);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.8;
+}
+
+.creds-hint strong { color: var(--helix-navy); font-weight: 600; }
+
+/* ══════════════════════════════════════════════════
+   APP SHELL — Topbar + Bottom Nav
+   ══════════════════════════════════════════════════ */
+.topbar {
+  background: var(--helix-navy);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 12px rgba(45,59,74,0.25);
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar-brand-name {
+  font-family: 'DM Serif Display', serif;
+  font-size: 17px;
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+
+.topbar-role-badge {
+  background: rgba(245,184,0,0.2);
+  color: var(--helix-gold);
+  border: 1px solid rgba(245,184,0,0.35);
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.7);
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  background: var(--helix-gold);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--helix-navy);
+  flex-shrink: 0;
+}
+
+.logout-btn {
+  padding: 6px 12px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.8);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  transition: all 0.2s;
+}
+.logout-btn:hover { background: rgba(255,255,255,0.18); }
+
+/* Bottom navigation */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border-top: 1.5px solid var(--border);
+  display: flex;
+  z-index: 100;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-shadow: 0 -4px 20px rgba(45,59,74,0.08);
+}
+
+.nav-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 4px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: 'DM Sans', sans-serif;
+  gap: 4px;
+  letter-spacing: 0.3px;
+  transition: color 0.2s;
+}
+
+.nav-btn svg { width: 20px; height: 20px; transition: transform 0.2s; }
+.nav-btn.active { color: var(--helix-navy); }
+.nav-btn.active svg { transform: scale(1.1); }
+.nav-btn.active .nav-dot {
+  width: 4px; height: 4px; background: var(--helix-gold);
+  border-radius: 50%; margin: 0 auto;
+  display: block;
+}
+
+/* Content area */
+.content {
+  flex: 1;
+  padding: 20px 16px 88px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ══════════════════════════════════════════════════
+   CARDS & LAYOUT
+   ══════════════════════════════════════════════════ */
+.card {
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.card-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.section-heading {
+  font-family: 'DM Serif Display', serif;
+  font-size: 20px;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.section-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+}
+
+/* Stats grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  border-radius: var(--radius-md);
+  padding: 18px 16px;
+  border: 1.5px solid transparent;
+}
+
+.stat-num {
+  font-family: 'DM Serif Display', serif;
+  font-size: 38px;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+/* Stat card colour variants */
+.stat-total  { background: var(--pastel-blue);   border-color: #bfdbfe; color: #1e40af; }
+.stat-in     { background: var(--pastel-green);  border-color: #a7f3d0; color: #065f46; }
+.stat-break  { background: var(--pastel-amber);  border-color: #fde68a; color: #92400e; }
+.stat-out    { background: var(--pastel-rose);   border-color: #fbcfe8; color: #9d174d; }
+
+/* ══════════════════════════════════════════════════
+   EMPLOYEE LIST
+   ══════════════════════════════════════════════════ */
+.emp-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+.emp-row:last-child { border-bottom: none; }
+
+.emp-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: var(--pastel-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 15px;
+  color: #1e40af;
+  flex-shrink: 0;
+  font-family: 'DM Serif Display', serif;
+}
+
+.emp-info { flex: 1; min-width: 0; }
+.emp-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.emp-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+.emp-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.badge-in     { background: var(--pastel-green); color: #065f46; }
+.badge-out    { background: var(--pastel-rose);  color: #9d174d; }
+.badge-break  { background: var(--pastel-amber); color: #92400e; }
+.badge-absent { background: #f3f4f6; color: #6b7280; }
+.badge-done   { background: var(--pastel-sky);   color: #0369a1; }
+
+/* ══════════════════════════════════════════════════
+   SEARCH
+   ══════════════════════════════════════════════════ */
+.search-wrap {
+  position: relative;
+  margin-bottom: 14px;
+}
+
+.search-wrap input {
+  width: 100%;
+  padding: 11px 16px 11px 42px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.search-wrap input:focus { border-color: var(--helix-gold); }
+
+.search-icon {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+/* ══════════════════════════════════════════════════
+   TABS
+   ══════════════════════════════════════════════════ */
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-page);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  margin-bottom: 20px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 9px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-transform: uppercase;
+}
+
+.tab-btn.active {
+  background: var(--helix-navy);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ══════════════════════════════════════════════════
+   QR SCANNER
+   ══════════════════════════════════════════════════ */
+.scanner-outer {
+  position: relative;
+  max-width: 340px;
+  margin: 0 auto 16px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: #1a1a1a;
+  aspect-ratio: 1;
+  box-shadow: var(--shadow-lg);
+}
+
+#scannerVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Corner frame brackets */
+.scanner-frame {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.frame-box {
+  width: 60%;
+  aspect-ratio: 1;
+  position: relative;
+}
+
+.frame-box::before,
+.frame-box::after,
+.fc-bl, .fc-br {
+  content: '';
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-color: var(--helix-gold);
+  border-style: solid;
+}
+.frame-box::before { top: 0; left: 0;  border-width: 3px 0 0 3px; border-radius: 4px 0 0 0; }
+.frame-box::after  { top: 0; right: 0; border-width: 3px 3px 0 0; border-radius: 0 4px 0 0; }
+.fc-bl { bottom: 0; left: 0;  border-width: 0 0 3px 3px; border-radius: 0 0 0 4px; }
+.fc-br { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-radius: 0 0 4px 0; }
+
+/* Animated scan line */
+.scan-beam {
+  position: absolute;
+  left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--helix-gold), transparent);
+  box-shadow: 0 0 8px var(--helix-gold);
+  animation: beam 2s ease-in-out infinite;
+}
+
+@keyframes beam {
+  0%, 100% { top: 10%; }
+  50%       { top: 90%; }
+}
+
+.scanner-status {
+  text-align: center;
+  padding: 12px 16px;
+  background: var(--pastel-amber);
+  border: 1.5px solid #fde68a;
+  border-radius: var(--radius-sm);
+  margin-bottom: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #78350f;
+  letter-spacing: 0.3px;
+}
+
+.scanner-status.ready {
+  background: var(--pastel-green);
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+/* ══════════════════════════════════════════════════
+   SCAN RESULT POPUP
+   ══════════════════════════════════════════════════ */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(30,42,53,0.55);
+  z-index: 200;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.overlay.show { display: flex; }
+
+/* Bottom sheet style popup */
+.sheet {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 32px 28px 40px;
+  width: 100%;
+  max-width: 480px;
+  animation: sheetUp 0.28s cubic-bezier(0.34,1.56,0.64,1);
+}
+
+@keyframes sheetUp {
+  from { transform: translateY(100%); opacity: 0.6; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+/* Center popup for QR display */
+.popup-center {
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.popup-box {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  padding: 32px 28px;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: var(--shadow-lg);
+  animation: popIn 0.24s ease;
+}
+
+@keyframes popIn {
+  from { transform: scale(0.92); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+/* Scan result sheet content */
+.result-emoji { font-size: 48px; text-align: center; margin-bottom: 14px; }
+
+.result-name {
+  font-family: 'DM Serif Display', serif;
+  font-size: 26px;
+  text-align: center;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.result-id {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+  margin-bottom: 18px;
+}
+
+.result-action {
+  text-align: center;
+  padding: 10px 20px;
+  border-radius: 30px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  display: inline-block;
+  margin: 0 auto 8px;
+}
+.result-action-wrap { text-align: center; }
+
+.result-time {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 22px;
+}
+
+/* Supervisor label on scan result */
+.result-supervisor {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+  background: var(--pastel-violet);
+  padding: 6px 14px;
+  border-radius: 20px;
+  display: inline-block;
+}
+.result-sup-wrap { text-align: center; margin-bottom: 12px; }
+
+/* Timeline */
+.timeline { position: relative; padding-left: 22px; margin-bottom: 20px; }
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 7px; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+.tl-item { position: relative; padding-bottom: 14px; }
+.tl-dot {
+  position: absolute; left: -19px; top: 5px;
+  width: 10px; height: 10px;
+  border-radius: 50%; border: 2px solid var(--bg-card);
+}
+.tl-dot.in    { background: var(--col-in); }
+.tl-dot.out   { background: var(--col-out); }
+.tl-dot.break { background: var(--col-break); }
+.tl-time  { font-size: 13px; font-weight: 600; color: var(--helix-navy); }
+.tl-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
+
+/* QR display */
+.qr-white-box {
+  background: #fff;
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: inline-block;
+  margin: 0 auto 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ══════════════════════════════════════════════════
+   REPORTS TABLE
+   ══════════════════════════════════════════════════ */
+.table-wrap { overflow-x: auto; border-radius: var(--radius-sm); }
+
+table.report {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 520px;
+}
+
+table.report thead tr { background: var(--helix-navy); }
+
+table.report th {
+  padding: 11px 14px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.75);
+}
+
+table.report td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+table.report tr:last-child td { border-bottom: none; }
+table.report tr:hover td { background: var(--pastel-amber); }
+
+.hours-num {
+  font-family: 'DM Serif Display', serif;
+  font-size: 16px;
+  color: var(--helix-navy);
+}
+.hours-full  { color: var(--col-in); }
+.hours-short { color: var(--col-out); }
+
+/* Date/filter row */
+.filter-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.filter-bar input[type="date"],
+.filter-bar input[type="month"] {
+  flex: 1;
+  min-width: 140px;
+  padding: 10px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+  color-scheme: light;
+}
+
+.filter-bar input:focus { border-color: var(--helix-gold); }
+
+.export-btns { display: flex; gap: 8px; }
+
+/* Log items (dashboard + scanner) */
+.log-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+}
+.log-item:last-child { border-bottom: none; }
+
+.log-icon {
+  width: 36px; height: 36px;
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; flex-shrink: 0;
+}
+.log-icon.in    { background: var(--pastel-green); }
+.log-icon.out   { background: var(--pastel-rose); }
+.log-icon.break { background: var(--pastel-amber); }
+
+.log-info { flex: 1; min-width: 0; }
+.log-main { font-weight: 600; font-size: 13px; }
+.log-sub  { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.log-time { font-size: 12px; font-weight: 600; color: var(--helix-navy); flex-shrink: 0; }
+
+/* ══════════════════════════════════════════════════
+   SUPERVISOR SCANNER — Employee picker
+   ══════════════════════════════════════════════════ */
+.sup-emp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.sup-emp-tile {
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.18s;
+  text-align: center;
+}
+
+.sup-emp-tile:hover { border-color: var(--helix-gold); transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.sup-emp-tile.selected { border-color: var(--helix-navy); background: var(--pastel-blue); }
+
+.sup-tile-avatar {
+  width: 44px; height: 44px;
+  border-radius: 10px;
+  background: var(--pastel-blue);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'DM Serif Display', serif;
+  font-size: 18px; color: #1e40af;
+  margin: 0 auto 8px;
+}
+
+.sup-tile-name { font-size: 13px; font-weight: 600; line-height: 1.3; }
+.sup-tile-status { margin-top: 6px; }
+
+/* ══════════════════════════════════════════════════
+   TOAST NOTIFICATION
+   ══════════════════════════════════════════════════ */
+.toast {
+  position: fixed;
+  bottom: 90px;
+  left: 50%;
+  transform: translateX(-50%) translateY(12px);
+  background: var(--helix-navy);
+  color: #fff;
+  border-radius: 30px;
+  padding: 11px 22px;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0;
+  transition: all 0.3s ease;
+  z-index: 999;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+  max-width: 90vw;
+  text-align: center;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ══════════════════════════════════════════════════
+   EMPTY STATE
+   ══════════════════════════════════════════════════ */
+.empty {
+  text-align: center;
+  padding: 32px 20px;
+  color: var(--text-muted);
+}
+.empty .empty-icon { font-size: 36px; margin-bottom: 10px; }
+.empty p { font-size: 13px; }
+
+/* ══════════════════════════════════════════════════
+   SETTINGS
+   ══════════════════════════════════════════════════ */
+.danger-zone {
+  border-color: #fca5a5 !important;
+  background: #fff5f5;
+}
+
+/* ══════════════════════════════════════════════════
+   ATTENDANCE PROGRESS BAR (hours)
+   ══════════════════════════════════════════════════ */
+.progress-wrap { margin-top: 6px; }
+.progress-bar {
+  height: 5px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--helix-gold), var(--col-in));
+  transition: width 0.4s ease;
+}
+
+/* ══════════════════════════════════════════════════
+   PRINT STYLES
+   ══════════════════════════════════════════════════ */
+@media print {
+  body { background: #fff; }
+  .topbar, .bottom-nav, .filter-bar .btn, .btn { display: none !important; }
+  .card { box-shadow: none; border: 1px solid #ddd; page-break-inside: avoid; }
+  table.report thead tr { background: #2d3b4a !important; -webkit-print-color-adjust: exact; }
+  table.report th { color: #fff !important; }
+  .hours-full { color: #059669 !important; }
+  .hours-short { color: #dc2626 !important; }
+}
+
+/* ══════════════════════════════════════════════════
+   RESPONSIVE
+   ══════════════════════════════════════════════════ */
+@media (min-width: 640px) {
+  .content { max-width: 680px; margin: 0 auto; }
+  .stats-grid { grid-template-columns: repeat(4, 1fr); }
+  .sup-emp-grid { grid-template-columns: repeat(3, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════
+     LOGIN SCREEN
+     ══════════════════════════════════════════════════ -->
+<div id="loginScreen" class="screen active">
+  <div class="login-card">
+
+    <!-- Helix Logo (SVG recreation of the geometric H mark) -->
+    <div class="helix-logo">
+      <div class="helix-logo-mark">
+        <svg width="54" height="54" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <!-- Outer navy square -->
+          <rect width="100" height="100" fill="#2d3b4a" rx="10"/>
+          <!-- Gold H shape — two vertical bars + horizontal crossbar with cutouts -->
+          <!-- Left vertical bar -->
+          <rect x="10" y="10" width="26" height="80" fill="#f5b800"/>
+          <!-- Right vertical bar -->
+          <rect x="64" y="10" width="26" height="80" fill="#f5b800"/>
+          <!-- Crossbar (middle) -->
+          <rect x="10" y="40" width="80" height="20" fill="#f5b800"/>
+          <!-- Navy cutouts to create the Helix step pattern -->
+          <rect x="36" y="10" width="28" height="30" fill="#2d3b4a"/>
+          <rect x="36" y="60" width="28" height="30" fill="#2d3b4a"/>
+        </svg>
+      </div>
+      <div class="helix-logo-text-wrap">
+        <div class="helix-logo-company">Helix Industries</div>
+        <div class="helix-logo-tagline">Attendance System</div>
+      </div>
+    </div>
+
+    <!-- Role selector — Admin / Guard / Supervisor -->
+    <div class="role-selector" id="roleTabs">
+      <button class="role-btn active" onclick="setRole('admin')">Admin</button>
+      <button class="role-btn" onclick="setRole('guard')">Guard</button>
+      <button class="role-btn" onclick="setRole('supervisor')">Supervisor</button>
+    </div>
+
+    <div class="field">
+      <label>Username</label>
+      <input type="text" id="loginUser" placeholder="Enter username" autocomplete="off" autocapitalize="none">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="loginPass" placeholder="Enter password" onkeydown="if(event.key==='Enter') doLogin()">
+    </div>
+
+    <button class="btn btn-navy btn-full" onclick="doLogin()">Sign In</button>
+    <div class="error-text" id="loginError"></div>
+
+    <!-- Default credentials hint -->
+    <div class="creds-hint">
+      <strong>Admin:</strong> admin / admin123<br>
+      <strong>Guard:</strong> guard / guard123<br>
+      <strong>Supervisors:</strong> sup1 / sup123 · sup2 / sup123 · sup3 / sup123
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     ADMIN SCREEN
+     ══════════════════════════════════════════════════ -->
+<div id="adminScreen" class="screen">
+  <div class="topbar">
+    <div class="topbar-brand">
+      <!-- Inline mini logo -->
+      <svg width="28" height="28" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100" height="100" fill="#f5b800" rx="8"/>
+        <rect x="10" y="10" width="26" height="80" fill="#2d3b4a"/>
+        <rect x="64" y="10" width="26" height="80" fill="#2d3b4a"/>
+        <rect x="10" y="40" width="80" height="20" fill="#2d3b4a"/>
+        <rect x="36" y="10" width="28" height="30" fill="#f5b800"/>
+        <rect x="36" y="60" width="28" height="30" fill="#f5b800"/>
+      </svg>
+      <span class="topbar-brand-name">Helix Attend</span>
+      <span class="topbar-role-badge">Admin</span>
+    </div>
+    <div class="topbar-right">
+      <div class="user-chip">
+        <div class="user-avatar" id="adminAvatar">A</div>
+      </div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <!-- Admin bottom navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" onclick="adminNav('dashboard')" id="aN-dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      <span class="nav-dot"></span>Dashboard
+    </button>
+    <button class="nav-btn" onclick="adminNav('employees')" id="aN-employees">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span class="nav-dot"></span>Employees
+    </button>
+    <button class="nav-btn" onclick="adminNav('reports')" id="aN-reports">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span class="nav-dot"></span>Reports
+    </button>
+    <button class="nav-btn" onclick="adminNav('settings')" id="aN-settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+      <span class="nav-dot"></span>Settings
+    </button>
+  </nav>
+
+  <div class="content">
+
+    <!-- ── DASHBOARD PAGE ── -->
+    <div class="page active" id="aP-dashboard">
+      <p class="section-heading">Today's Overview</p>
+      <p class="section-sub" id="todayDateLabel">—</p>
+
+      <div class="stats-grid">
+        <div class="stat-card stat-total">
+          <div class="stat-num" id="sDashTotal">0</div>
+          <div class="stat-label">Employees</div>
+        </div>
+        <div class="stat-card stat-in">
+          <div class="stat-num" id="sDashIn">0</div>
+          <div class="stat-label">Checked In</div>
+        </div>
+        <div class="stat-card stat-break">
+          <div class="stat-num" id="sDashBreak">0</div>
+          <div class="stat-label">On Break</div>
+        </div>
+        <div class="stat-card stat-out">
+          <div class="stat-num" id="sDashOut">0</div>
+          <div class="stat-label">Checked Out</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📋 Live Activity Feed</div>
+        <div id="dashActivityLog">
+          <div class="empty"><div class="empty-icon">📭</div><p>No activity recorded today</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── EMPLOYEES PAGE ── -->
+    <div class="page" id="aP-employees">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <p class="section-heading">Employees</p>
+        <button class="btn btn-navy btn-sm" onclick="toggleAddForm()">＋ Add</button>
+      </div>
+      <p class="section-sub">Manage staff and generate QR codes</p>
+
+      <!-- Add employee form (collapsible) -->
+      <div class="card" id="addEmpFormCard" style="display:none">
+        <div class="card-title">➕ New Employee</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="field">
+            <label>First Name</label>
+            <input id="efFirst" type="text" placeholder="Rajan">
+          </div>
+          <div class="field">
+            <label>Last Name</label>
+            <input id="efLast" type="text" placeholder="Sharma">
+          </div>
+        </div>
+        <div class="field">
+          <label>Department</label>
+          <input id="efDept" type="text" placeholder="Production, Packaging…">
+        </div>
+        <div class="field">
+          <label>Assigned Supervisor</label>
+          <select id="efSupervisor">
+            <option value="">— None / General —</option>
+            <option value="sup1">Supervisor 1</option>
+            <option value="sup2">Supervisor 2</option>
+            <option value="sup3">Supervisor 3</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Mobile (optional)</label>
+          <input id="efPhone" type="tel" placeholder="+91 98765 43210">
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-navy" style="flex:1" onclick="addEmployee()">Save Employee</button>
+          <button class="btn btn-outline btn-sm" onclick="toggleAddForm()">Cancel</button>
+        </div>
+        <div class="error-text" id="empFormError"></div>
+      </div>
+
+      <!-- Search -->
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" placeholder="Search by name, ID, department…" id="empSearchInput" oninput="renderEmployeeList()">
+      </div>
+
+      <!-- Employee list -->
+      <div class="card" id="empListCard">
+        <div class="empty"><div class="empty-icon">👥</div><p>No employees added yet</p></div>
+      </div>
+    </div>
+
+    <!-- ── REPORTS PAGE ── -->
+    <div class="page" id="aP-reports">
+      <p class="section-heading">Reports</p>
+      <p class="section-sub">Daily & monthly attendance reports</p>
+
+      <!-- Report type tabs (Daily / Monthly) -->
+      <div class="tabs">
+        <button class="tab-btn active" onclick="reportTabSwitch('daily')"   id="rTab-daily">Daily</button>
+        <button class="tab-btn"        onclick="reportTabSwitch('monthly')" id="rTab-monthly">Monthly</button>
+      </div>
+
+      <!-- Scanned-by filter (Guard vs Supervisor) -->
+      <div class="tabs" id="scannerFilterTabs" style="margin-top:-10px">
+        <button class="tab-btn active" onclick="setScannerFilter('all')"      id="sF-all">All</button>
+        <button class="tab-btn"        onclick="setScannerFilter('guard')"    id="sF-guard">Guard</button>
+        <button class="tab-btn"        onclick="setScannerFilter('sup1')"     id="sF-sup1">Sup 1</button>
+        <button class="tab-btn"        onclick="setScannerFilter('sup2')"     id="sF-sup2">Sup 2</button>
+        <button class="tab-btn"        onclick="setScannerFilter('sup3')"     id="sF-sup3">Sup 3</button>
+      </div>
+
+      <!-- Daily report -->
+      <div id="rView-daily">
+        <div class="filter-bar">
+          <input type="date" id="rDailyDate" onchange="renderDailyReport()">
+          <div class="export-btns">
+            <button class="btn btn-outline btn-sm" onclick="printReport()">🖨</button>
+            <button class="btn btn-gold btn-sm" onclick="exportDailyXLSX()">📊 XLSX</button>
+          </div>
+        </div>
+        <div class="card" id="dailyReportCard">
+          <div class="empty"><div class="empty-icon">📅</div><p>Select a date above</p></div>
+        </div>
+      </div>
+
+      <!-- Monthly report -->
+      <div id="rView-monthly" style="display:none">
+        <div class="filter-bar">
+          <input type="month" id="rMonthPicker" onchange="renderMonthlyReport()">
+          <div class="export-btns">
+            <button class="btn btn-outline btn-sm" onclick="printReport()">🖨</button>
+            <button class="btn btn-gold btn-sm" onclick="exportMonthlyXLSX()">📊 XLSX</button>
+          </div>
+        </div>
+        <div class="card" id="monthlyReportCard">
+          <div class="empty"><div class="empty-icon">📆</div><p>Select a month above</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS PAGE ── -->
+    <div class="page" id="aP-settings">
+      <p class="section-heading">Settings</p>
+      <p class="section-sub">System configuration</p>
+
+      <div class="card">
+        <div class="card-title">⏰ Shift Configuration</div>
+        <div class="field">
+          <label>Shift Start</label>
+          <input type="time" id="sShiftStart" value="09:00">
+        </div>
+        <div class="field">
+          <label>Shift End</label>
+          <input type="time" id="sShiftEnd" value="18:30">
+        </div>
+        <div class="field">
+          <label>Lunch Break (minutes)</label>
+          <input type="number" id="sLunchMins" value="30" min="0" max="120">
+        </div>
+        <div class="field">
+          <label>Expected Daily Net Hours (after break)</label>
+          <input type="number" id="sExpectedHrs" value="9" min="1" max="24" step="0.5">
+        </div>
+        <button class="btn btn-navy" onclick="saveSettings()">Save Settings</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🔐 Change Admin Password</div>
+        <div class="field">
+          <label>New Password</label>
+          <input type="password" id="sNewPass" placeholder="Min 6 characters">
+        </div>
+        <div class="field">
+          <label>Confirm Password</label>
+          <input type="password" id="sConfPass" placeholder="Repeat password">
+        </div>
+        <button class="btn btn-navy" onclick="changeAdminPassword()">Update Password</button>
+        <div class="error-text" id="sPassError"></div>
+      </div>
+
+      <div class="card danger-zone">
+        <div class="card-title" style="color:#dc2626">⚠ Danger Zone</div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Clear all attendance data permanently. This cannot be undone.</p>
+        <button class="btn btn-danger" onclick="clearAllAttendance()">Clear All Records</button>
+      </div>
+    </div>
+
+  </div><!-- /admin content -->
+</div><!-- /adminScreen -->
+
+<!-- ══════════════════════════════════════════════════
+     GUARD SCREEN
+     ══════════════════════════════════════════════════ -->
+<div id="guardScreen" class="screen">
+  <div class="topbar">
+    <div class="topbar-brand">
+      <svg width="28" height="28" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100" height="100" fill="#f5b800" rx="8"/>
+        <rect x="10" y="10" width="26" height="80" fill="#2d3b4a"/>
+        <rect x="64" y="10" width="26" height="80" fill="#2d3b4a"/>
+        <rect x="10" y="40" width="80" height="20" fill="#2d3b4a"/>
+        <rect x="36" y="10" width="28" height="30" fill="#f5b800"/>
+        <rect x="36" y="60" width="28" height="30" fill="#f5b800"/>
+      </svg>
+      <span class="topbar-brand-name">Helix Attend</span>
+      <span class="topbar-role-badge">Guard</span>
+    </div>
+    <div class="topbar-right">
+      <div class="user-avatar" id="guardAvatar" style="background:var(--helix-gold);color:var(--helix-navy)">G</div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <div class="content" style="padding-bottom:24px">
+    <!-- Scanner status indicator -->
+    <div class="scanner-status" id="guardScanStatus">📷 Tap button to start camera</div>
+
+    <!-- Camera viewport -->
+    <div class="scanner-outer" id="guardScanOuter">
+      <video id="guardVideo" playsinline autoplay muted></video>
+      <canvas id="guardCanvas" style="display:none"></canvas>
+      <div class="scanner-frame">
+        <div class="frame-box">
+          <div class="fc-bl"></div>
+          <div class="fc-br"></div>
+          <div class="scan-beam"></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-bottom:20px">
+      <button class="btn btn-navy" style="flex:1" id="guardStartBtn" onclick="guardStartScanner()">📷 Start Camera</button>
+      <button class="btn btn-outline" style="flex:1;display:none" id="guardStopBtn" onclick="guardStopScanner()">⏹ Stop</button>
+    </div>
+
+    <!-- Recent scans today by this guard -->
+    <div class="card">
+      <div class="card-title">📜 My Scans Today</div>
+      <div id="guardRecentScans">
+        <div class="empty"><div class="empty-icon">📭</div><p>No scans yet today</p></div>
+      </div>
+    </div>
+  </div>
+</div><!-- /guardScreen -->
+
+<!-- ══════════════════════════════════════════════════
+     SUPERVISOR SCREEN
+     ══════════════════════════════════════════════════ -->
+<div id="supervisorScreen" class="screen">
+  <div class="topbar">
+    <div class="topbar-brand">
+      <svg width="28" height="28" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100" height="100" fill="#f5b800" rx="8"/>
+        <rect x="10" y="10" width="26" height="80" fill="#2d3b4a"/>
+        <rect x="64" y="10" width="26" height="80" fill="#2d3b4a"/>
+        <rect x="10" y="40" width="80" height="20" fill="#2d3b4a"/>
+        <rect x="36" y="10" width="28" height="30" fill="#f5b800"/>
+        <rect x="36" y="60" width="28" height="30" fill="#f5b800"/>
+      </svg>
+      <span class="topbar-brand-name">Helix Attend</span>
+      <span class="topbar-role-badge" id="supRoleBadge">Supervisor</span>
+    </div>
+    <div class="topbar-right">
+      <div class="user-avatar" id="supAvatar" style="background:var(--pastel-violet);color:#5b21b6">S</div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <!-- Supervisor bottom nav -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" onclick="supNav('scan')" id="sN-scan">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><line x1="16" y1="16" x2="21" y2="16"/><line x1="16" y1="19" x2="21" y2="19"/><line x1="19" y1="16" x2="19" y2="21"/></svg>
+      <span class="nav-dot"></span>QR Scan
+    </button>
+    <button class="nav-btn" onclick="supNav('team')" id="sN-team">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span class="nav-dot"></span>My Team
+    </button>
+  </nav>
+
+  <div class="content">
+
+    <!-- ── SUPERVISOR SCAN PAGE ── -->
+    <div class="page active" id="sP-scan">
+      <p class="section-heading" id="supScanHeading">QR Scanner</p>
+      <p class="section-sub">Scan employee QR code to mark attendance</p>
+
+      <div class="scanner-status" id="supScanStatus">📷 Tap button to start camera</div>
+
+      <div class="scanner-outer" id="supScanOuter">
+        <video id="supVideo" playsinline autoplay muted></video>
+        <canvas id="supCanvas" style="display:none"></canvas>
+        <div class="scanner-frame">
+          <div class="frame-box">
+            <div class="fc-bl"></div>
+            <div class="fc-br"></div>
+            <div class="scan-beam"></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-bottom:20px">
+        <button class="btn btn-navy" style="flex:1" id="supStartBtn" onclick="supStartScanner()">📷 Start Camera</button>
+        <button class="btn btn-outline" style="flex:1;display:none" id="supStopBtn" onclick="supStopScanner()">⏹ Stop</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📜 My Team's Scans Today</div>
+        <div id="supRecentScans">
+          <div class="empty"><div class="empty-icon">📭</div><p>No scans yet today</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SUPERVISOR TEAM PAGE ── -->
+    <div class="page" id="sP-team">
+      <p class="section-heading">My Team</p>
+      <p class="section-sub" id="supTeamSub">Employees under your supervision</p>
+
+      <div class="stats-grid" style="grid-template-columns:repeat(2,1fr)">
+        <div class="stat-card stat-in">
+          <div class="stat-num" id="supStatIn">0</div>
+          <div class="stat-label">Checked In</div>
+        </div>
+        <div class="stat-card stat-out">
+          <div class="stat-num" id="supStatOut">0</div>
+          <div class="stat-label">Checked Out</div>
+        </div>
+      </div>
+
+      <div class="card" id="supTeamCard">
+        <div class="empty"><div class="empty-icon">👥</div><p>No employees assigned to you yet</p></div>
+      </div>
+    </div>
+
+  </div>
+</div><!-- /supervisorScreen -->
+
+<!-- ══════════════════════════════════════════════════
+     SCAN RESULT BOTTOM SHEET
+     ══════════════════════════════════════════════════ -->
+<div class="overlay" id="scanResultOverlay">
+  <div class="sheet">
+    <div class="result-emoji" id="srEmoji">✅</div>
+    <div class="result-name" id="srName">Employee Name</div>
+    <div class="result-id" id="srId">EMP1001 · Department</div>
+    <div class="result-action-wrap">
+      <div class="result-action" id="srAction">Check In</div>
+    </div>
+    <div class="result-sup-wrap">
+      <span class="result-supervisor" id="srSupLabel" style="display:none"></span>
+    </div>
+    <div class="result-time" id="srTime"></div>
+
+    <!-- Today's scan timeline for this employee -->
+    <div id="srTimeline" style="margin-bottom:20px"></div>
+
+    <button class="btn btn-navy btn-full" onclick="closeScanResult()">Continue Scanning</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     QR CODE POPUP
+     ══════════════════════════════════════════════════ -->
+<div class="overlay popup-center" id="qrOverlay">
+  <div class="popup-box" style="text-align:center">
+    <div class="card-title" style="justify-content:center;margin-bottom:20px">Employee QR Code</div>
+    <div class="qr-white-box">
+      <div id="qrRenderTarget"></div>
+    </div>
+    <div style="font-family:'DM Serif Display',serif;font-size:22px;margin-bottom:4px" id="qrPopupName"></div>
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:20px;letter-spacing:1px" id="qrPopupId"></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-navy" style="flex:1" onclick="downloadQRCode()">⬇ Download</button>
+      <button class="btn btn-outline" style="flex:1" onclick="closeOverlay('qrOverlay')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast notification -->
+<div class="toast" id="toastEl"></div>
+
+<!-- ══════════════════════════════════════════════════
+     JAVASCRIPT — APPLICATION LOGIC
+     ══════════════════════════════════════════════════ -->
+<script>
+/* ────────────────────────────────────────────────────────────────
+   CONSTANTS & SHIFT CONFIG
+   ──────────────────────────────────────────────────────────────── */
+const SHIFT_DEFAULT = {
+  start: '09:00',   // Helix Industries shift start
+  end:   '18:30',   // Shift end
+  lunchMins: 30,    // Mandatory lunch deduction
+  expectedHrs: 9    // Net working hours expected per day
+};
+
+/* ────────────────────────────────────────────────────────────────
+   STORAGE HELPERS — thin wrapper around localStorage
+   ──────────────────────────────────────────────────────────────── */
+const Store = {
+  get(key, fallback = null) {
+    try { return JSON.parse(localStorage.getItem('helix_' + key)) ?? fallback; }
+    catch { return fallback; }
+  },
+  set(key, value) {
+    localStorage.setItem('helix_' + key, JSON.stringify(value));
+  }
+};
+
+/* ────────────────────────────────────────────────────────────────
+   INITIALIZE DATABASE with default users and settings
+   ──────────────────────────────────────────────────────────────── */
+function initDB() {
+  // Default user accounts (Admin + Guard + 3 Supervisors)
+  if (!Store.get('users')) {
+    Store.set('users', [
+      { id: 'admin', pass: 'admin123', role: 'admin',      name: 'Administrator' },
+      { id: 'guard', pass: 'guard123', role: 'guard',      name: 'Gate Guard' },
+      { id: 'sup1',  pass: 'sup123',  role: 'supervisor',  name: 'Supervisor 1', label: 'Supervisor 1' },
+      { id: 'sup2',  pass: 'sup123',  role: 'supervisor',  name: 'Supervisor 2', label: 'Supervisor 2' },
+      { id: 'sup3',  pass: 'sup123',  role: 'supervisor',  name: 'Supervisor 3', label: 'Supervisor 3' }
+    ]);
+  }
+  if (!Store.get('employees'))  Store.set('employees', []);
+  if (!Store.get('attendance')) Store.set('attendance', []);
+  if (!Store.get('settings'))   Store.set('settings', SHIFT_DEFAULT);
+  if (!Store.get('empCounter')) Store.set('empCounter', 1000);
+}
+initDB();
+
+/* ────────────────────────────────────────────────────────────────
+   SESSION STATE
+   ──────────────────────────────────────────────────────────────── */
+let currentUser    = null;   // Active logged-in user object
+let loginRoleMode  = 'admin'; // Which role tab is selected
+let currentQREmp   = null;   // Employee whose QR is being displayed
+let scannerFilter  = 'all';  // Report filter: all | guard | sup1 | sup2 | sup3
+let reportMode     = 'daily'; // Current report tab
+let lastScannedId  = null;   // Last scanned QR data (for debounce)
+let lastScanTime   = 0;
+
+// Scanner stream references — separate per role
+let guardStream    = null;
+let guardInterval  = null;
+let supStream      = null;
+let supInterval    = null;
+
+/* ────────────────────────────────────────────────────────────────
+   LOGIN / AUTH
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Sets which role tab is selected on the login screen.
+ * @param {string} role - 'admin' | 'guard' | 'supervisor'
+ */
+function setRole(role) {
+  loginRoleMode = role;
+  document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+}
+
+/** Validates credentials and routes to appropriate screen. */
+function doLogin() {
+  const uid  = document.getElementById('loginUser').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  const errEl = document.getElementById('loginError');
+
+  const users = Store.get('users', []);
+  const user  = users.find(u => u.id === uid && u.pass === pass && u.role === loginRoleMode);
+
+  if (!user) {
+    errEl.textContent = 'Incorrect username or password.';
+    return;
+  }
+
+  currentUser = user;
+  errEl.textContent = '';
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPass').value = '';
+
+  // Route to the correct screen
+  if (user.role === 'admin') {
+    document.getElementById('adminAvatar').textContent = user.name[0].toUpperCase();
+    showScreen('adminScreen');
+    refreshDashboard();
+  } else if (user.role === 'guard') {
+    document.getElementById('guardAvatar').textContent = user.name[0].toUpperCase();
+    showScreen('guardScreen');
+    renderGuardScans();
+  } else if (user.role === 'supervisor') {
+    document.getElementById('supAvatar').textContent = user.name[0].toUpperCase();
+    document.getElementById('supRoleBadge').textContent = user.label || user.name;
+    document.getElementById('supScanHeading').textContent = 'Scanner — ' + (user.label || user.name);
+    showScreen('supervisorScreen');
+    renderSupScans();
+    renderSupTeam();
+  }
+}
+
+/** Logs out and returns to login screen, stopping any active camera. */
+function logout() {
+  guardStopScanner();
+  supStopScanner();
+  currentUser = null;
+  showScreen('loginScreen');
+}
+
+/* ────────────────────────────────────────────────────────────────
+   SCREEN & PAGE NAVIGATION
+   ──────────────────────────────────────────────────────────────── */
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+/**
+ * Admin bottom-nav switcher.
+ * @param {string} page - 'dashboard' | 'employees' | 'reports' | 'settings'
+ */
+function adminNav(page) {
+  document.querySelectorAll('#adminScreen .page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#adminScreen .nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('aP-' + page).classList.add('active');
+  document.getElementById('aN-' + page).classList.add('active');
+
+  // Trigger data refresh when entering each section
+  if (page === 'dashboard') refreshDashboard();
+  if (page === 'employees') renderEmployeeList();
+  if (page === 'reports') {
+    const today = todayStr();
+    document.getElementById('rDailyDate').value = today;
+    document.getElementById('rMonthPicker').value = today.slice(0, 7);
+    renderDailyReport();
+  }
+  if (page === 'settings') loadSettings();
+}
+
+/**
+ * Supervisor bottom-nav switcher.
+ * @param {string} page - 'scan' | 'team'
+ */
+function supNav(page) {
+  document.querySelectorAll('#supervisorScreen .page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#supervisorScreen .nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('sP-' + page).classList.add('active');
+  document.getElementById('sN-' + page).classList.add('active');
+
+  if (page === 'team') renderSupTeam();
+}
+
+/* ────────────────────────────────────────────────────────────────
+   EMPLOYEE MANAGEMENT
+   ──────────────────────────────────────────────────────────────── */
+
+function toggleAddForm() {
+  const card = document.getElementById('addEmpFormCard');
+  card.style.display = card.style.display === 'none' ? 'block' : 'none';
+}
+
+/**
+ * Adds a new employee to the database and generates a unique ID.
+ */
+function addEmployee() {
+  const first  = document.getElementById('efFirst').value.trim();
+  const last   = document.getElementById('efLast').value.trim();
+  const dept   = document.getElementById('efDept').value.trim();
+  const supId  = document.getElementById('efSupervisor').value;
+  const phone  = document.getElementById('efPhone').value.trim();
+  const errEl  = document.getElementById('empFormError');
+
+  if (!first || !last) { errEl.textContent = 'First and last name are required.'; return; }
+
+  const counter = Store.get('empCounter', 1000) + 1;
+  Store.set('empCounter', counter);
+
+  const emp = {
+    id:         'EMP' + counter,
+    firstName:  first,
+    lastName:   last,
+    name:       first + ' ' + last,
+    dept:       dept || 'General',
+    supervisor: supId || '',   // Which supervisor this employee belongs to
+    phone:      phone,
+    createdAt:  new Date().toISOString()
+  };
+
+  const emps = Store.get('employees', []);
+  emps.push(emp);
+  Store.set('employees', emps);
+
+  // Reset form
+  ['efFirst','efLast','efDept','efPhone'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('efSupervisor').value = '';
+  errEl.textContent = '';
+  toggleAddForm();
+
+  renderEmployeeList();
+  showToast('✅ ' + emp.name + ' added');
+}
+
+/**
+ * Renders the employee list with optional search filter.
+ * Shows today's status badge next to each employee.
+ */
+function renderEmployeeList() {
+  const q    = (document.getElementById('empSearchInput')?.value || '').toLowerCase();
+  const emps = Store.get('employees', []).filter(e =>
+    !q || e.name.toLowerCase().includes(q) ||
+    e.id.toLowerCase().includes(q) ||
+    (e.dept || '').toLowerCase().includes(q)
+  );
+
+  const card = document.getElementById('empListCard');
+  if (!emps.length) {
+    card.innerHTML = '<div class="empty"><div class="empty-icon">👥</div><p>No employees found</p></div>';
+    return;
+  }
+
+  const today = todayStr();
+  const att   = Store.get('attendance', []);
+
+  card.innerHTML = emps.map(emp => {
+    const todayRecs = att.filter(r => r.empId === emp.id && r.date === today);
+    const lastRec   = todayRecs.at(-1);
+    const badge     = getStatusBadge(lastRec);
+    const initials  = (emp.firstName[0] + emp.lastName[0]).toUpperCase();
+    const supLabel  = emp.supervisor ? getSupervisorLabel(emp.supervisor) : '';
+
+    return `
+      <div class="emp-row">
+        <div class="emp-avatar">${initials}</div>
+        <div class="emp-info">
+          <div class="emp-name">${emp.name} ${badge}</div>
+          <div class="emp-meta">${emp.id} · ${emp.dept}${supLabel ? ' · ' + supLabel : ''}</div>
+        </div>
+        <div class="emp-actions">
+          <button class="btn btn-gold btn-xs" onclick="openQRPopup('${emp.id}')">QR</button>
+          <button class="btn btn-danger btn-xs" onclick="deleteEmployee('${emp.id}')">✕</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+/** Deletes employee and their attendance records. */
+function deleteEmployee(empId) {
+  if (!confirm('Delete this employee and all their attendance data?')) return;
+  Store.set('employees', Store.get('employees', []).filter(e => e.id !== empId));
+  Store.set('attendance', Store.get('attendance', []).filter(r => r.empId !== empId));
+  renderEmployeeList();
+  showToast('🗑 Employee removed');
+}
+
+/** Returns human-readable supervisor label for a supervisor ID. */
+function getSupervisorLabel(supId) {
+  const users = Store.get('users', []);
+  const s = users.find(u => u.id === supId);
+  return s ? s.label || s.name : supId;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   QR CODE GENERATION
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Opens the QR popup for a given employee.
+ * Encodes employee ID + name + department into the QR payload.
+ * @param {string} empId
+ */
+function openQRPopup(empId) {
+  const emps = Store.get('employees', []);
+  const emp  = emps.find(e => e.id === empId);
+  if (!emp) return;
+
+  currentQREmp = emp;
+  document.getElementById('qrPopupName').textContent = emp.name;
+  document.getElementById('qrPopupId').textContent   = emp.id + ' · ' + emp.dept;
+
+  // Clear previous QR and generate new one
+  const target = document.getElementById('qrRenderTarget');
+  target.innerHTML = '';
+
+  const payload = JSON.stringify({ id: emp.id, name: emp.name, dept: emp.dept });
+  new QRCode(target, {
+    text:         payload,
+    width:        200,
+    height:       200,
+    colorDark:    '#2d3b4a',
+    colorLight:   '#ffffff',
+    correctLevel: QRCode.CorrectLevel.H
+  });
+
+  openOverlay('qrOverlay');
+}
+
+/** Downloads the generated QR code canvas as PNG. */
+function downloadQRCode() {
+  if (!currentQREmp) return;
+  setTimeout(() => {
+    const canvas = document.querySelector('#qrRenderTarget canvas');
+    if (!canvas) { showToast('QR not ready, try again'); return; }
+    const a = document.createElement('a');
+    a.download = 'QR_' + currentQREmp.id + '_' + currentQREmp.name.replace(/\s+/g, '_') + '.png';
+    a.href = canvas.toDataURL();
+    a.click();
+    showToast('⬇ QR downloaded');
+  }, 80);
+}
+
+/* ────────────────────────────────────────────────────────────────
+   QR SCANNER — GUARD
+   ──────────────────────────────────────────────────────────────── */
+
+/** Starts the camera for the guard's scanner. */
+function guardStartScanner() {
+  initCameraScanner(
+    'guardVideo', 'guardCanvas', 'guardScanStatus',
+    'guardStartBtn', 'guardStopBtn',
+    stream => { guardStream = stream; },
+    intervalId => { guardInterval = intervalId; },
+    qrData => processScan(qrData, 'guard')
+  );
+}
+
+/** Stops the guard's camera scanner. */
+function guardStopScanner() {
+  stopCameraScanner(
+    guardStream, guardInterval,
+    'guardScanStatus', 'guardStartBtn', 'guardStopBtn', 'guardVideo'
+  );
+  guardStream = null; guardInterval = null;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   QR SCANNER — SUPERVISOR
+   ──────────────────────────────────────────────────────────────── */
+
+/** Starts the camera for the supervisor's scanner. */
+function supStartScanner() {
+  initCameraScanner(
+    'supVideo', 'supCanvas', 'supScanStatus',
+    'supStartBtn', 'supStopBtn',
+    stream => { supStream = stream; },
+    intervalId => { supInterval = intervalId; },
+    qrData => processScan(qrData, currentUser ? currentUser.id : 'supervisor')
+  );
+}
+
+/** Stops the supervisor's camera scanner. */
+function supStopScanner() {
+  stopCameraScanner(
+    supStream, supInterval,
+    'supScanStatus', 'supStartBtn', 'supStopBtn', 'supVideo'
+  );
+  supStream = null; supInterval = null;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   CAMERA SCANNER — SHARED UTILITIES
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Generic camera initialiser used by both Guard and Supervisor scanners.
+ * @param {string} videoId  - ID of <video> element
+ * @param {string} canvasId - ID of <canvas> element (hidden, for frame capture)
+ * @param {string} statusId - ID of status display div
+ * @param {string} startBtnId - ID of start button
+ * @param {string} stopBtnId  - ID of stop button
+ * @param {function} onStream - Callback receiving the MediaStream
+ * @param {function} onInterval - Callback receiving the setInterval ID
+ * @param {function} onQRFound  - Callback receiving decoded QR string
+ */
+function initCameraScanner(videoId, canvasId, statusId, startBtnId, stopBtnId, onStream, onInterval, onQRFound) {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showToast('⚠ Camera not supported on this device');
+    return;
+  }
+
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+  })
+  .then(stream => {
+    onStream(stream);
+    const video = document.getElementById(videoId);
+    video.srcObject = stream;
+    video.play();
+
+    // Update UI
+    document.getElementById(startBtnId).style.display = 'none';
+    document.getElementById(stopBtnId).style.display  = 'flex';
+    const statusEl = document.getElementById(statusId);
+    statusEl.textContent = '🟢 Scanning — hold QR code steady';
+    statusEl.classList.add('ready');
+
+    // Poll every 250 ms for QR codes
+    const id = setInterval(() => {
+      const vid = document.getElementById(videoId);
+      if (!vid.videoWidth) return;
+      const cvs = document.getElementById(canvasId);
+      cvs.width  = vid.videoWidth;
+      cvs.height = vid.videoHeight;
+      const ctx = cvs.getContext('2d');
+      ctx.drawImage(vid, 0, 0);
+      const imageData = ctx.getImageData(0, 0, cvs.width, cvs.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+      if (code) onQRFound(code.data);
+    }, 250);
+
+    onInterval(id);
+  })
+  .catch(() => {
+    document.getElementById(statusId).textContent = '❌ Camera access denied — please allow permission';
+    showToast('⚠ Camera permission denied');
+  });
+}
+
+/**
+ * Generic camera stopper.
+ */
+function stopCameraScanner(stream, intervalId, statusId, startBtnId, stopBtnId, videoId) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (intervalId) clearInterval(intervalId);
+  const vid = document.getElementById(videoId);
+  if (vid) vid.srcObject = null;
+  const startBtn = document.getElementById(startBtnId);
+  const stopBtn  = document.getElementById(stopBtnId);
+  if (startBtn) startBtn.style.display = 'flex';
+  if (stopBtn)  stopBtn.style.display  = 'none';
+  const statusEl = document.getElementById(statusId);
+  if (statusEl) {
+    statusEl.textContent = '📷 Tap button to start camera';
+    statusEl.classList.remove('ready');
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────
+   ATTENDANCE SCAN PROCESSING
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Processes a decoded QR string, determines attendance action, and records it.
+ * Action sequence: Check In → Break Start → Break End → Check Out
+ * If an employee is already checked out, next scan = new Check In.
+ *
+ * @param {string} raw       - Raw QR string (JSON payload)
+ * @param {string} scannedBy - User ID of who scanned (guard | sup1 | sup2 | sup3)
+ */
+function processScan(raw, scannedBy) {
+  // Debounce: ignore same QR within 3 seconds
+  const now = Date.now();
+  if (raw === lastScannedId && now - lastScanTime < 3000) return;
+  lastScannedId = raw;
+  lastScanTime  = now;
+
+  // Parse QR payload
+  let payload;
+  try { payload = JSON.parse(raw); }
+  catch { showToast('⚠ Invalid QR code'); return; }
+
+  const emps = Store.get('employees', []);
+  const emp  = emps.find(e => e.id === payload.id);
+  if (!emp) { showToast('⚠ Employee not found: ' + payload.id); return; }
+
+  // Determine next action based on today's existing records
+  const dateStr   = todayStr();
+  const timeStr   = new Date().toTimeString().slice(0, 8);
+  const att       = Store.get('attendance', []);
+  const todayRecs = att.filter(r => r.empId === emp.id && r.date === dateStr);
+  const lastRec   = todayRecs.at(-1);
+
+  let type, emoji, actionLabel, actionCls;
+
+  if (!lastRec || lastRec.type === 'check-out') {
+    // No record today, or already checked out → new check-in
+    type = 'check-in'; emoji = '✅'; actionLabel = 'Check In'; actionCls = 'badge-in';
+  } else if (lastRec.type === 'check-in' || lastRec.type === 'break-end') {
+    // Currently working → start break
+    type = 'break-start'; emoji = '☕'; actionLabel = 'Break Start'; actionCls = 'badge-break';
+  } else if (lastRec.type === 'break-start') {
+    // On break → end break
+    type = 'break-end'; emoji = '▶️'; actionLabel = 'Break End'; actionCls = 'badge-in';
+  } else {
+    // Fallback → check-out
+    type = 'check-out'; emoji = '🚪'; actionLabel = 'Check Out'; actionCls = 'badge-out';
+  }
+
+  // Save attendance record
+  const record = {
+    id:        Date.now().toString(),
+    empId:     emp.id,
+    empName:   emp.name,
+    dept:      emp.dept,
+    date:      dateStr,
+    time:      timeStr,
+    timestamp: new Date().toISOString(),
+    type:      type,
+    scannedBy: scannedBy   // Tracks which guard/supervisor scanned this
+  };
+
+  att.push(record);
+  Store.set('attendance', att);
+
+  // Show result popup
+  showScanResult(emp, record, [...todayRecs, record], scannedBy);
+
+  // Refresh recent-scan lists
+  renderGuardScans();
+  renderSupScans();
+
+  // Haptic feedback
+  if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
+}
+
+/**
+ * Displays the scan result bottom sheet with timeline.
+ * @param {object} emp        - Employee object
+ * @param {object} record     - The new attendance record just created
+ * @param {Array}  todayRecs  - All records for this employee today (incl. new one)
+ * @param {string} scannedBy  - Scanner user ID
+ */
+function showScanResult(emp, record, todayRecs, scannedBy) {
+  const actionColors = {
+    'check-in':    { bg: 'var(--pastel-green)', color: '#065f46' },
+    'check-out':   { bg: 'var(--pastel-rose)',  color: '#9d174d' },
+    'break-start': { bg: 'var(--pastel-amber)', color: '#92400e' },
+    'break-end':   { bg: 'var(--pastel-sky)',   color: '#0369a1' }
+  };
+  const emojis = { 'check-in': '✅', 'check-out': '🚪', 'break-start': '☕', 'break-end': '▶️' };
+  const labels = { 'check-in': 'CHECK IN', 'check-out': 'CHECK OUT', 'break-start': 'BREAK START', 'break-end': 'BREAK END' };
+
+  document.getElementById('srEmoji').textContent  = emojis[record.type];
+  document.getElementById('srName').textContent   = emp.name;
+  document.getElementById('srId').textContent     = emp.id + ' · ' + emp.dept;
+
+  const actionEl = document.getElementById('srAction');
+  actionEl.textContent   = labels[record.type];
+  const ac = actionColors[record.type];
+  actionEl.style.background = ac.bg;
+  actionEl.style.color       = ac.color;
+
+  // Show scanned-by supervisor label (hidden for guard)
+  const supLabel = document.getElementById('srSupLabel');
+  if (scannedBy && scannedBy !== 'guard') {
+    supLabel.textContent  = '📋 Marked by ' + getSupervisorLabel(scannedBy);
+    supLabel.style.display = 'inline-block';
+  } else {
+    supLabel.style.display = 'none';
+  }
+
+  document.getElementById('srTime').textContent =
+    '🕐 ' + new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
+    '  ·  ' + new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  // Build timeline
+  const dotClass = { 'check-in': 'in', 'check-out': 'out', 'break-start': 'break', 'break-end': 'in' };
+  const tlHtml = todayRecs.map(r =>
+    `<div class="tl-item">
+       <div class="tl-dot ${dotClass[r.type] || 'in'}"></div>
+       <div class="tl-time">${r.time}</div>
+       <div class="tl-label">${labels[r.type] || r.type}</div>
+     </div>`
+  ).join('');
+
+  document.getElementById('srTimeline').innerHTML =
+    tlHtml ? `<div class="timeline">${tlHtml}</div>` : '';
+
+  openOverlay('scanResultOverlay');
+}
+
+function closeScanResult() {
+  closeOverlay('scanResultOverlay');
+  lastScannedId = null; // Allow re-scan of same person after manual close
+}
+
+/* ────────────────────────────────────────────────────────────────
+   RECENT SCAN LISTS
+   ──────────────────────────────────────────────────────────────── */
+
+const LOG_ICONS  = { 'check-in': '✅', 'check-out': '🚪', 'break-start': '☕', 'break-end': '▶️' };
+const LOG_LABELS = { 'check-in': 'Check In', 'check-out': 'Check Out', 'break-start': 'Break Start', 'break-end': 'Break End' };
+const LOG_DOTS   = { 'check-in': 'in', 'check-out': 'out', 'break-start': 'break', 'break-end': 'in' };
+
+/**
+ * Renders today's scans done by the gate guard.
+ */
+function renderGuardScans() {
+  const today = todayStr();
+  const recs  = Store.get('attendance', [])
+    .filter(r => r.date === today && r.scannedBy === 'guard')
+    .reverse().slice(0, 20);
+  renderScanLog('guardRecentScans', recs);
+}
+
+/**
+ * Renders today's scans done by the current supervisor.
+ */
+function renderSupScans() {
+  if (!currentUser) return;
+  const today = todayStr();
+  const recs  = Store.get('attendance', [])
+    .filter(r => r.date === today && r.scannedBy === currentUser.id)
+    .reverse().slice(0, 20);
+  renderScanLog('supRecentScans', recs);
+}
+
+/**
+ * Generic scan log renderer.
+ * @param {string} containerId - DOM element ID
+ * @param {Array}  recs        - Array of attendance records
+ */
+function renderScanLog(containerId, recs) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!recs.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><p>No scans yet today</p></div>';
+    return;
+  }
+  el.innerHTML = recs.map(r => `
+    <div class="log-item">
+      <div class="log-icon ${LOG_DOTS[r.type] || 'in'}">${LOG_ICONS[r.type] || '📌'}</div>
+      <div class="log-info">
+        <div class="log-main">${r.empName}</div>
+        <div class="log-sub">${r.empId || ''} · ${LOG_LABELS[r.type] || r.type}</div>
+      </div>
+      <div class="log-time">${r.time}</div>
+    </div>`).join('');
+}
+
+/* ────────────────────────────────────────────────────────────────
+   SUPERVISOR TEAM VIEW
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Renders the supervisor's team page showing their assigned employees
+ * and today's attendance status for each.
+ */
+function renderSupTeam() {
+  if (!currentUser) return;
+  const allEmps = Store.get('employees', []);
+  // Filter employees assigned to this supervisor
+  const myEmps  = allEmps.filter(e => e.supervisor === currentUser.id);
+
+  document.getElementById('supTeamSub').textContent =
+    `${myEmps.length} employee${myEmps.length !== 1 ? 's' : ''} under your supervision`;
+
+  const today = todayStr();
+  const att   = Store.get('attendance', []);
+  let inCount = 0, outCount = 0;
+
+  const card = document.getElementById('supTeamCard');
+  if (!myEmps.length) {
+    card.innerHTML = '<div class="empty"><div class="empty-icon">👥</div><p>No employees assigned to you yet.<br>Ask admin to assign employees.</p></div>';
+    document.getElementById('supStatIn').textContent  = 0;
+    document.getElementById('supStatOut').textContent = 0;
+    return;
+  }
+
+  card.innerHTML = myEmps.map(emp => {
+    const todayRecs = att.filter(r => r.empId === emp.id && r.date === today);
+    const lastRec   = todayRecs.at(-1);
+    const badge     = getStatusBadge(lastRec);
+    const initials  = (emp.firstName[0] + emp.lastName[0]).toUpperCase();
+
+    // Count for stats
+    if (lastRec) {
+      if (lastRec.type === 'check-in' || lastRec.type === 'break-end') inCount++;
+      else if (lastRec.type === 'check-out') outCount++;
+    }
+
+    return `
+      <div class="emp-row">
+        <div class="emp-avatar">${initials}</div>
+        <div class="emp-info">
+          <div class="emp-name">${emp.name} ${badge}</div>
+          <div class="emp-meta">${emp.id} · ${emp.dept}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  document.getElementById('supStatIn').textContent  = inCount;
+  document.getElementById('supStatOut').textContent = outCount;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   DASHBOARD REFRESH
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Updates dashboard stats and activity feed with today's data.
+ */
+function refreshDashboard() {
+  const emps  = Store.get('employees', []);
+  const today = todayStr();
+  const att   = Store.get('attendance', []).filter(r => r.date === today);
+
+  // Update date label
+  document.getElementById('todayDateLabel').textContent =
+    new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  document.getElementById('sDashTotal').textContent = emps.length;
+
+  // Count status per employee
+  let inCount = 0, breakCount = 0, outCount = 0;
+  emps.forEach(emp => {
+    const recs = att.filter(r => r.empId === emp.id);
+    const last = recs.at(-1);
+    if (!last) return;
+    if (last.type === 'check-in'   || last.type === 'break-end')  inCount++;
+    else if (last.type === 'break-start')                          breakCount++;
+    else if (last.type === 'check-out')                            outCount++;
+  });
+
+  document.getElementById('sDashIn').textContent    = inCount;
+  document.getElementById('sDashBreak').textContent = breakCount;
+  document.getElementById('sDashOut').textContent   = outCount;
+
+  // Activity feed — most recent 25 records
+  const recent = [...att].reverse().slice(0, 25);
+  const logEl  = document.getElementById('dashActivityLog');
+  if (!recent.length) {
+    logEl.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><p>No activity today</p></div>';
+    return;
+  }
+  logEl.innerHTML = recent.map(r => `
+    <div class="log-item">
+      <div class="log-icon ${LOG_DOTS[r.type] || 'in'}">${LOG_ICONS[r.type] || '📌'}</div>
+      <div class="log-info">
+        <div class="log-main">${r.empName}</div>
+        <div class="log-sub">${LOG_LABELS[r.type] || r.type} · ${r.scannedBy === 'guard' ? 'Gate Guard' : getSupervisorLabel(r.scannedBy)}</div>
+      </div>
+      <div class="log-time">${r.time}</div>
+    </div>`).join('');
+}
+
+/* ────────────────────────────────────────────────────────────────
+   ATTENDANCE CALCULATION
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Calculates worked hours for one employee on a specific date.
+ * Deducts lunch break if total time >= threshold.
+ *
+ * @param {string} empId - Employee ID
+ * @param {string} date  - Date string YYYY-MM-DD
+ * @returns {object} { checkIn, checkOut, breakMins, workedHrs, status, progress }
+ */
+function calcAttendance(empId, date) {
+  const att  = Store.get('attendance', []).filter(r => r.empId === empId && r.date === date);
+  const cfg  = Store.get('settings', SHIFT_DEFAULT);
+
+  if (!att.length) return { checkIn: '—', checkOut: '—', breakMins: 0, workedHrs: 0, status: 'absent', progress: 0 };
+
+  const sorted   = [...att].sort((a, b) => a.time.localeCompare(b.time));
+  const firstIn  = sorted.find(r => r.type === 'check-in');
+  const lastOut  = sorted.filter(r => r.type === 'check-out').at(-1);
+
+  if (!firstIn) return { checkIn: '—', checkOut: '—', breakMins: 0, workedHrs: 0, status: 'no-checkin', progress: 0 };
+
+  // Calculate explicit break durations
+  let breakMins = 0;
+  let bStart    = null;
+  sorted.forEach(r => {
+    if (r.type === 'break-start') bStart = r.time;
+    if (r.type === 'break-end' && bStart) {
+      breakMins += timeToMins(r.time) - timeToMins(bStart);
+      bStart = null;
+    }
+  });
+
+  // Total elapsed time (check-in to check-out or now if still in)
+  const endTime   = lastOut ? lastOut.time : new Date().toTimeString().slice(0, 8);
+  const totalMins = Math.max(0, timeToMins(endTime) - timeToMins(firstIn.time));
+
+  // Net working minutes = total − explicit breaks
+  const workedMins = Math.max(0, totalMins - breakMins);
+  const workedHrs  = (workedMins / 60).toFixed(2);
+
+  // Progress toward expected hours (0–100)
+  const progress   = Math.min(100, (workedMins / (cfg.expectedHrs * 60)) * 100);
+
+  const status = !lastOut ? 'active' : 'complete';
+
+  return {
+    checkIn:   firstIn.time,
+    checkOut:  lastOut ? lastOut.time : '—',
+    breakMins: Math.round(breakMins),
+    workedHrs: parseFloat(workedHrs),
+    status,
+    progress:  Math.round(progress)
+  };
+}
+
+/** Converts "HH:MM:SS" or "HH:MM" to total minutes. */
+function timeToMins(t) {
+  const [h, m, s] = t.split(':').map(Number);
+  return h * 60 + m + (s || 0) / 60;
+}
+
+/** Formats minutes as "Xh Ym" string. */
+function minsToHM(mins) {
+  const h = Math.floor(mins / 60);
+  const m = Math.round(mins % 60);
+  return h + 'h ' + m + 'm';
+}
+
+/* ────────────────────────────────────────────────────────────────
+   REPORTS — DAILY
+   ──────────────────────────────────────────────────────────────── */
+
+let activeReportDate  = ''; // Persists between tab switches
+let activeReportMonth = '';
+
+/** Switches between daily and monthly report views. */
+function reportTabSwitch(mode) {
+  reportMode = mode;
+  document.getElementById('rView-daily').style.display   = mode === 'daily'   ? 'block' : 'none';
+  document.getElementById('rView-monthly').style.display = mode === 'monthly' ? 'block' : 'none';
+  document.querySelectorAll('[id^="rTab-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('rTab-' + mode).classList.add('active');
+  if (mode === 'daily')   renderDailyReport();
+  if (mode === 'monthly') renderMonthlyReport();
+}
+
+/** Sets which scanner's records to show in reports (all / guard / sup1-3). */
+function setScannerFilter(filter) {
+  scannerFilter = filter;
+  document.querySelectorAll('[id^="sF-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('sF-' + filter).classList.add('active');
+  if (reportMode === 'daily')   renderDailyReport();
+  if (reportMode === 'monthly') renderMonthlyReport();
+}
+
+/**
+ * Renders the daily attendance report table.
+ * Filters records by the selected scanner (guard / supervisor).
+ */
+function renderDailyReport() {
+  const date = document.getElementById('rDailyDate').value;
+  if (!date) return;
+  activeReportDate = date;
+
+  const cfg  = Store.get('settings', SHIFT_DEFAULT);
+  const emps = getFilteredEmployees();
+  const el   = document.getElementById('dailyReportCard');
+
+  if (!emps.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">👥</div><p>No employees for this filter</p></div>';
+    return;
+  }
+
+  const rows = emps.map(emp => {
+    const h = calcAttendance(emp.id, date);
+    return { emp, h };
+  });
+
+  const present    = rows.filter(r => r.h.status !== 'absent').length;
+  const absent     = rows.filter(r => r.h.status === 'absent').length;
+  const totalHours = rows.reduce((s, r) => s + r.h.workedHrs, 0);
+  const avgHours   = present > 0 ? (totalHours / present).toFixed(1) : 0;
+
+  el.innerHTML = `
+    <div style="display:flex;gap:14px;margin-bottom:18px;flex-wrap:wrap">
+      <div style="flex:1;min-width:70px;text-align:center">
+        <div style="font-family:'DM Serif Display',serif;font-size:28px;color:var(--col-in)">${present}</div>
+        <div style="font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted)">Present</div>
+      </div>
+      <div style="flex:1;min-width:70px;text-align:center">
+        <div style="font-family:'DM Serif Display',serif;font-size:28px;color:var(--col-out)">${absent}</div>
+        <div style="font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted)">Absent</div>
+      </div>
+      <div style="flex:1;min-width:70px;text-align:center">
+        <div style="font-family:'DM Serif Display',serif;font-size:28px;color:var(--helix-navy)">${avgHours}h</div>
+        <div style="font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted)">Avg Hours</div>
+      </div>
+    </div>
+    <div class="table-wrap">
+    <table class="report">
+      <thead><tr>
+        <th>Employee</th>
+        <th>In</th>
+        <th>Out</th>
+        <th>Break</th>
+        <th>Net Hours</th>
+        <th>Status</th>
+      </tr></thead>
+      <tbody>
+      ${rows.map(({ emp, h }) => {
+        const full  = h.workedHrs >= cfg.expectedHrs;
+        const hrCls = h.status === 'absent' ? '' : full ? 'hours-full' : 'hours-short';
+        return `<tr>
+          <td>
+            <strong>${emp.name}</strong><br>
+            <span style="font-size:11px;color:var(--text-muted)">${emp.id} · ${emp.dept}</span>
+          </td>
+          <td>${h.checkIn}</td>
+          <td>${h.checkOut}</td>
+          <td>${h.breakMins > 0 ? minsToHM(h.breakMins) : '—'}</td>
+          <td>
+            <span class="hours-num ${hrCls}">${h.status === 'absent' ? '—' : h.workedHrs.toFixed(1) + 'h'}</span>
+            ${h.status !== 'absent' ? `
+            <div class="progress-wrap">
+              <div class="progress-bar"><div class="progress-fill" style="width:${h.progress}%"></div></div>
+            </div>` : ''}
+          </td>
+          <td>${getStatusBadgeHtml(h.status)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   REPORTS — MONTHLY
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Renders the monthly attendance summary table.
+ * Shows days present, days absent, total & average hours per employee.
+ */
+function renderMonthlyReport() {
+  const month = document.getElementById('rMonthPicker').value;
+  if (!month) return;
+  activeReportMonth = month;
+
+  const [yr, mo] = month.split('-').map(Number);
+  const daysCount = new Date(yr, mo, 0).getDate();
+  const cfg       = Store.get('settings', SHIFT_DEFAULT);
+  const emps      = getFilteredEmployees();
+  const el        = document.getElementById('monthlyReportCard');
+
+  if (!emps.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">👥</div><p>No employees for this filter</p></div>';
+    return;
+  }
+
+  const rows = emps.map(emp => {
+    let daysPresent = 0, totalHrs = 0, fullDays = 0;
+    for (let d = 1; d <= daysCount; d++) {
+      const date = `${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const h    = calcAttendance(emp.id, date);
+      if (h.status !== 'absent') {
+        daysPresent++;
+        totalHrs += h.workedHrs;
+        if (h.workedHrs >= cfg.expectedHrs) fullDays++;
+      }
+    }
+    const avgHrs = daysPresent > 0 ? (totalHrs / daysPresent).toFixed(1) : 0;
+    return { emp, daysPresent, daysAbsent: daysCount - daysPresent, totalHrs: totalHrs.toFixed(1), avgHrs, fullDays };
+  });
+
+  const totalPresent = rows.reduce((s, r) => s + r.daysPresent, 0);
+  const avgPresence  = rows.length > 0 ? (totalPresent / rows.length).toFixed(1) : 0;
+
+  el.innerHTML = `
+    <div style="font-size:12px;font-weight:600;letter-spacing:1px;color:var(--text-muted);margin-bottom:16px;text-transform:uppercase">
+      ${new Date(yr, mo-1).toLocaleString('en-IN', { month: 'long', year: 'numeric' })}
+      · Avg Attendance: ${avgPresence} days
+    </div>
+    <div class="table-wrap">
+    <table class="report">
+      <thead><tr>
+        <th>Employee</th>
+        <th>Department</th>
+        <th>Present</th>
+        <th>Absent</th>
+        <th>Full Days</th>
+        <th>Total Hrs</th>
+        <th>Avg Hrs/Day</th>
+      </tr></thead>
+      <tbody>
+      ${rows.map(({ emp, daysPresent, daysAbsent, totalHrs, avgHrs, fullDays }) => {
+        const avgNum = parseFloat(avgHrs);
+        const hrCls  = avgNum >= cfg.expectedHrs * 0.9 ? 'hours-full' : avgNum > 0 ? '' : 'hours-short';
+        return `<tr>
+          <td><strong>${emp.name}</strong><br><span style="font-size:11px;color:var(--text-muted)">${emp.id}</span></td>
+          <td>${emp.dept}</td>
+          <td style="color:var(--col-in);font-weight:600">${daysPresent}</td>
+          <td style="color:${daysAbsent > 5 ? 'var(--col-out)' : 'var(--text-muted)'};font-weight:600">${daysAbsent}</td>
+          <td>${fullDays}</td>
+          <td><span class="hours-num">${totalHrs}h</span></td>
+          <td><span class="hours-num ${hrCls}">${avgHrs}h</span></td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   REPORT FILTERING HELPERS
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Returns employees filtered by the selected scanner.
+ * If filter = 'all', return all employees.
+ * If filter = 'guard', return employees checked in by guard.
+ * If filter = 'supN', return employees assigned to that supervisor.
+ */
+function getFilteredEmployees() {
+  const emps = Store.get('employees', []);
+  if (scannerFilter === 'all')   return emps;
+  if (scannerFilter === 'guard') return emps; // Guard can scan any employee; filter in calc
+  // Supervisor filter — show only their assigned employees
+  return emps.filter(e => e.supervisor === scannerFilter);
+}
+
+/* ────────────────────────────────────────────────────────────────
+   EXCEL (XLSX) EXPORT
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Exports the daily report to a well-formatted XLSX file.
+ * Uses SheetJS (xlsx library).
+ */
+function exportDailyXLSX() {
+  const date = document.getElementById('rDailyDate').value;
+  if (!date) { showToast('⚠ Select a date first'); return; }
+
+  const cfg  = Store.get('settings', SHIFT_DEFAULT);
+  const emps = getFilteredEmployees();
+
+  // Build data rows
+  const dataRows = emps.map(emp => {
+    const h = calcAttendance(emp.id, date);
+    return {
+      'Employee ID':   emp.id,
+      'Name':          emp.name,
+      'Department':    emp.dept,
+      'Supervisor':    emp.supervisor ? getSupervisorLabel(emp.supervisor) : 'General',
+      'Check In':      h.checkIn,
+      'Check Out':     h.checkOut,
+      'Break (mins)':  h.status !== 'absent' ? h.breakMins : '',
+      'Net Hours':     h.status !== 'absent' ? h.workedHrs : 0,
+      'Expected Hrs':  cfg.expectedHrs,
+      'Full Day?':     h.status !== 'absent' ? (h.workedHrs >= cfg.expectedHrs ? 'Yes' : 'No') : '—',
+      'Status':        h.status === 'absent' ? 'Absent' : h.status === 'active' ? 'Active' : 'Complete'
+    };
+  });
+
+  const wb = XLSX.utils.book_new();
+
+  // ── Summary sheet ──
+  const summaryData = [
+    ['Helix Industries — Daily Attendance Report'],
+    ['Date:', date],
+    ['Shift:', cfg.start + ' – ' + cfg.end],
+    ['Expected Hours:', cfg.expectedHrs + ' hrs'],
+    ['Generated:', new Date().toLocaleString('en-IN')],
+    ['Filter:', scannerFilter === 'all' ? 'All Scanners' : scannerFilter === 'guard' ? 'Gate Guard' : getSupervisorLabel(scannerFilter)],
+    [],
+    ['Present:', emps.filter(e => calcAttendance(e.id, date).status !== 'absent').length],
+    ['Absent:',  emps.filter(e => calcAttendance(e.id, date).status === 'absent').length],
+    ['Total:',   emps.length]
+  ];
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+
+  // ── Attendance detail sheet ──
+  const wsData = XLSX.utils.json_to_sheet(dataRows);
+
+  // Column widths
+  wsData['!cols'] = [
+    { wch: 12 }, { wch: 22 }, { wch: 16 }, { wch: 16 },
+    { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 12 },
+    { wch: 12 }, { wch: 10 }, { wch: 12 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsData, 'Attendance');
+
+  // Write and download
+  XLSX.writeFile(wb, `Helix_Daily_Attendance_${date}_${scannerFilter}.xlsx`);
+  showToast('📊 Daily XLSX exported!');
+}
+
+/**
+ * Exports the monthly report to a multi-sheet XLSX file.
+ * Sheet 1: Summary | Sheet 2: Monthly totals | Sheet 3+: Day-by-day for each supervisor
+ */
+function exportMonthlyXLSX() {
+  const month = document.getElementById('rMonthPicker').value;
+  if (!month) { showToast('⚠ Select a month first'); return; }
+
+  const [yr, mo] = month.split('-').map(Number);
+  const daysCount = new Date(yr, mo, 0).getDate();
+  const cfg       = Store.get('settings', SHIFT_DEFAULT);
+  const emps      = getFilteredEmployees();
+  const monthName = new Date(yr, mo-1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+
+  const wb = XLSX.utils.book_new();
+
+  // ── Sheet 1: Monthly Summary ──
+  const summaryRows = emps.map(emp => {
+    let daysPresent = 0, totalHrs = 0, fullDays = 0;
+    for (let d = 1; d <= daysCount; d++) {
+      const date = `${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const h    = calcAttendance(emp.id, date);
+      if (h.status !== 'absent') {
+        daysPresent++;
+        totalHrs += h.workedHrs;
+        if (h.workedHrs >= cfg.expectedHrs) fullDays++;
+      }
+    }
+    return {
+      'Employee ID':   emp.id,
+      'Name':          emp.name,
+      'Department':    emp.dept,
+      'Supervisor':    emp.supervisor ? getSupervisorLabel(emp.supervisor) : 'General',
+      'Days Present':  daysPresent,
+      'Days Absent':   daysCount - daysPresent,
+      'Full Days':     fullDays,
+      'Total Hrs':     parseFloat(totalHrs.toFixed(2)),
+      'Avg Hrs/Day':   daysPresent > 0 ? parseFloat((totalHrs / daysPresent).toFixed(2)) : 0,
+      'Expected Hrs/Day': cfg.expectedHrs
+    };
+  });
+
+  const wsMonthly = XLSX.utils.json_to_sheet(summaryRows);
+  wsMonthly['!cols'] = [
+    {wch:12},{wch:22},{wch:16},{wch:16},{wch:13},{wch:12},{wch:10},{wch:12},{wch:13},{wch:15}
+  ];
+  // Add title row above
+  XLSX.utils.sheet_add_aoa(wsMonthly, [
+    ['Helix Industries — Monthly Attendance Report — ' + monthName],
+    ['Filter: ' + (scannerFilter === 'all' ? 'All Scanners' : scannerFilter === 'guard' ? 'Gate Guard' : getSupervisorLabel(scannerFilter))],
+    []
+  ], { origin: 'A1' });
+  XLSX.utils.book_append_sheet(wb, wsMonthly, 'Monthly Summary');
+
+  // ── Sheet 2: Day-by-Day Detail ──
+  // Columns: Employee | Date | Day | Check In | Check Out | Break | Hours | Full Day?
+  const dayRows = [];
+  for (let d = 1; d <= daysCount; d++) {
+    const date    = `${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dayName = new Date(yr, mo-1, d).toLocaleString('en-IN', { weekday: 'short' });
+    emps.forEach(emp => {
+      const h = calcAttendance(emp.id, date);
+      dayRows.push({
+        'Date':         date,
+        'Day':          dayName,
+        'Employee ID':  emp.id,
+        'Name':         emp.name,
+        'Department':   emp.dept,
+        'Check In':     h.checkIn,
+        'Check Out':    h.checkOut,
+        'Break (min)':  h.breakMins || '',
+        'Net Hours':    h.status !== 'absent' ? h.workedHrs : 0,
+        'Full Day?':    h.status === 'absent' ? 'Absent' : (h.workedHrs >= cfg.expectedHrs ? 'Yes' : 'No')
+      });
+    });
+  }
+  const wsDayDetail = XLSX.utils.json_to_sheet(dayRows);
+  wsDayDetail['!cols'] = [
+    {wch:12},{wch:6},{wch:12},{wch:22},{wch:16},{wch:10},{wch:10},{wch:12},{wch:11},{wch:10}
+  ];
+  XLSX.utils.book_append_sheet(wb, wsDayDetail, 'Day-by-Day');
+
+  // ── Sheets 3–5: One per supervisor ──
+  ['sup1','sup2','sup3'].forEach(supId => {
+    const supEmps = Store.get('employees', []).filter(e => e.supervisor === supId);
+    if (!supEmps.length) return;
+
+    const supRows = supEmps.map(emp => {
+      let daysPresent = 0, totalHrs = 0;
+      for (let d = 1; d <= daysCount; d++) {
+        const date = `${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const h    = calcAttendance(emp.id, date);
+        if (h.status !== 'absent') { daysPresent++; totalHrs += h.workedHrs; }
+      }
+      return {
+        'Employee ID':  emp.id,
+        'Name':         emp.name,
+        'Department':   emp.dept,
+        'Days Present': daysPresent,
+        'Days Absent':  daysCount - daysPresent,
+        'Total Hrs':    parseFloat(totalHrs.toFixed(2)),
+        'Avg Hrs/Day':  daysPresent > 0 ? parseFloat((totalHrs / daysPresent).toFixed(2)) : 0
+      };
+    });
+
+    const wsS = XLSX.utils.json_to_sheet(supRows);
+    wsS['!cols'] = [{wch:12},{wch:22},{wch:16},{wch:13},{wch:12},{wch:12},{wch:13}];
+    XLSX.utils.book_append_sheet(wb, wsS, getSupervisorLabel(supId).replace(/\s+/g,'_'));
+  });
+
+  XLSX.writeFile(wb, `Helix_Monthly_Attendance_${month}_${scannerFilter}.xlsx`);
+  showToast('📊 Monthly XLSX exported!');
+}
+
+function printReport() { window.print(); }
+
+/* ────────────────────────────────────────────────────────────────
+   SETTINGS
+   ──────────────────────────────────────────────────────────────── */
+
+function loadSettings() {
+  const s = Store.get('settings', SHIFT_DEFAULT);
+  document.getElementById('sShiftStart').value  = s.start;
+  document.getElementById('sShiftEnd').value    = s.end;
+  document.getElementById('sLunchMins').value   = s.lunchMins;
+  document.getElementById('sExpectedHrs').value = s.expectedHrs;
+}
+
+function saveSettings() {
+  Store.set('settings', {
+    start:       document.getElementById('sShiftStart').value   || '09:00',
+    end:         document.getElementById('sShiftEnd').value     || '18:30',
+    lunchMins:   parseInt(document.getElementById('sLunchMins').value)   || 30,
+    expectedHrs: parseFloat(document.getElementById('sExpectedHrs').value) || 9
+  });
+  showToast('✅ Settings saved');
+}
+
+function changeAdminPassword() {
+  const np   = document.getElementById('sNewPass').value;
+  const cp   = document.getElementById('sConfPass').value;
+  const errEl = document.getElementById('sPassError');
+  if (!np || np.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+  if (np !== cp)             { errEl.textContent = 'Passwords do not match.'; return; }
+  const users = Store.get('users', []);
+  const admin = users.find(u => u.id === 'admin');
+  if (admin) admin.pass = np;
+  Store.set('users', users);
+  errEl.textContent = '';
+  document.getElementById('sNewPass').value = '';
+  document.getElementById('sConfPass').value = '';
+  showToast('🔐 Password updated');
+}
+
+function clearAllAttendance() {
+  if (!confirm('Delete ALL attendance records? This cannot be undone.')) return;
+  Store.set('attendance', []);
+  showToast('🗑 All records cleared');
+  refreshDashboard();
+}
+
+/* ────────────────────────────────────────────────────────────────
+   UI HELPER FUNCTIONS
+   ──────────────────────────────────────────────────────────────── */
+
+/** Today's date as YYYY-MM-DD string. */
+function todayStr() {
+  return new Date().toISOString().split('T')[0];
+}
+
+/** Returns HTML badge for an attendance status. */
+function getStatusBadge(lastRec) {
+  if (!lastRec) return '';
+  const map = {
+    'check-in':    '<span class="badge badge-in">In</span>',
+    'break-start': '<span class="badge badge-break">Break</span>',
+    'break-end':   '<span class="badge badge-in">In</span>',
+    'check-out':   '<span class="badge badge-out">Out</span>'
+  };
+  return map[lastRec.type] || '';
+}
+
+/** Returns HTML badge for a report status string. */
+function getStatusBadgeHtml(status) {
+  const map = {
+    'absent':     '<span class="badge badge-absent">Absent</span>',
+    'active':     '<span class="badge badge-in">Active</span>',
+    'complete':   '<span class="badge badge-done">Done</span>',
+    'no-checkin': '<span class="badge badge-break">Incomplete</span>'
+  };
+  return map[status] || status;
+}
+
+/** Shows a brief toast notification. */
+function showToast(msg, ms = 2600) {
+  const el = document.getElementById('toastEl');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), ms);
+}
+
+/** Opens a modal overlay. */
+function openOverlay(id) {
+  document.getElementById(id).classList.add('show');
+}
+
+/** Closes a modal overlay. */
+function closeOverlay(id) {
+  document.getElementById(id).classList.remove('show');
+}
+
+// Close overlays when clicking backdrop
+document.querySelectorAll('.overlay').forEach(ov => {
+  ov.addEventListener('click', e => {
+    if (e.target === ov) ov.classList.remove('show');
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────
+   PWA SERVICE WORKER REGISTRATION
+   ──────────────────────────────────────────────────────────────── */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
