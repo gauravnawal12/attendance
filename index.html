@@ -623,20 +623,23 @@ body::after {
    ══════════════════════════════════════════════════ */
 .scanner-outer {
   position: relative;
-  max-width: 340px;
+  width: 100%;
+  max-width: 480px;
   margin: 0 auto 16px;
   border-radius: var(--radius-lg);
   overflow: hidden;
-  background: #1a1a1a;
-  aspect-ratio: 1;
+  background: #000;
   box-shadow: var(--shadow-lg);
+  /* No aspect-ratio: let the video define height naturally - no zoom/crop */
 }
 
-#scannerVideo {
+/* All video elements inside scanner - contain, never crop */
+.scanner-outer video {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto;
+  max-height: 60vh;
   display: block;
+  object-fit: contain;
 }
 
 /* Corner frame brackets */
@@ -647,10 +650,11 @@ body::after {
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  z-index: 2;
 }
 
 .frame-box {
-  width: 60%;
+  width: 55%;
   aspect-ratio: 1;
   position: relative;
 }
@@ -1941,85 +1945,99 @@ function supStopScanner() {
  */
 function initCameraScanner(videoId, canvasId, statusId, startBtnId, stopBtnId, onStream, onInterval, onQRFound) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    document.getElementById(statusId).textContent = '❌ Camera not supported on this browser/device';
-    showToast('⚠ Camera not supported — try Chrome or Safari');
+    document.getElementById(statusId).textContent = '❌ Camera not supported — use Chrome or Safari';
     return;
   }
 
-  // Try rear camera first; fall back to any camera if rear unavailable
-  const constraints = [
-    { video: { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } },
-    { video: { facingMode: 'environment',            width: { ideal: 1280 }, height: { ideal: 720 } } },
-    { video: true } // last resort: any camera
+  // Constraint list: try exact rear → preferred rear → any camera
+  const constraintList = [
+    { video: { facingMode: { exact: 'environment' } } },
+    { video: { facingMode: 'environment' } },
+    { video: true }
   ];
 
-  function tryNext(idx) {
-    if (idx >= constraints.length) {
-      document.getElementById(statusId).textContent = '❌ Camera access denied — please allow permission';
-      showToast('⚠ Camera permission denied');
+  function tryConstraint(idx) {
+    if (idx >= constraintList.length) {
+      document.getElementById(statusId).textContent = '❌ Cannot access camera — check permissions';
+      showToast('⚠ Camera blocked. Allow camera in browser settings.');
       return;
     }
-    navigator.mediaDevices.getUserMedia(constraints[idx])
-      .then(stream => {
+
+    navigator.mediaDevices.getUserMedia(constraintList[idx])
+      .then(function(stream) {
         onStream(stream);
-        const video = document.getElementById(videoId);
+
+        var video = document.getElementById(videoId);
         video.srcObject = stream;
-        video.setAttribute('playsinline', true); // iOS requires this attribute set
-        video.setAttribute('muted', true);
-        video.play().catch(() => {}); // suppress NotAllowedError on autoplay
+        video.setAttribute('playsinline', '');
+        video.setAttribute('muted', '');
+        video.muted = true;
 
-        // Update UI
-        document.getElementById(startBtnId).style.display = 'none';
-        document.getElementById(stopBtnId).style.display  = 'flex';
-        const statusEl = document.getElementById(statusId);
-        statusEl.textContent = '🟢 Scanning — hold QR code steady in the frame';
-        statusEl.classList.add('ready');
+        // Wait for metadata so we know dimensions before scanning
+        video.onloadedmetadata = function() {
+          video.play().catch(function(){});
 
-        // Use a shared offscreen canvas for speed
-        const cvs = document.getElementById(canvasId);
-        const ctx = cvs.getContext('2d', { willReadFrequently: true });
+          document.getElementById(startBtnId).style.display = 'none';
+          document.getElementById(stopBtnId).style.display  = 'flex';
+          var statusEl = document.getElementById(statusId);
+          statusEl.textContent = '🟢 Camera ready — point at QR code';
+          statusEl.classList.add('ready');
 
-        // Poll every 120 ms for faster detection
-        const id = setInterval(() => {
-          const vid = document.getElementById(videoId);
-          if (!vid.videoWidth || vid.paused || vid.ended) return;
+          // Offscreen canvas — reuse across frames for speed
+          var cvs = document.getElementById(canvasId);
+          var ctx = cvs.getContext('2d', { willReadFrequently: true });
 
-          // Downscale to 640px wide for speed while keeping aspect ratio
-          const scale  = Math.min(1, 640 / vid.videoWidth);
-          const w      = Math.round(vid.videoWidth  * scale);
-          const h      = Math.round(vid.videoHeight * scale);
-          cvs.width    = w;
-          cvs.height   = h;
-          ctx.drawImage(vid, 0, 0, w, h);
+          // Scan at 150ms intervals — fast but not CPU-killing
+          var scanId = setInterval(function() {
+            if (video.paused || video.ended || !video.videoWidth) return;
 
-          const imageData = ctx.getImageData(0, 0, w, h);
+            // Capture at native resolution for accuracy
+            var vw = video.videoWidth;
+            var vh = video.videoHeight;
+            cvs.width  = vw;
+            cvs.height = vh;
+            ctx.drawImage(video, 0, 0, vw, vh);
 
-          // Try both inversion modes to handle dark/light QR codes
-          let code = jsQR(imageData.data, w, h, { inversionAttempts: 'attemptBoth' });
-          if (code) onQRFound(code.data);
-        }, 120);
+            var imageData = ctx.getImageData(0, 0, vw, vh);
 
-        onInterval(id);
+            // attemptBoth handles light-on-dark AND dark-on-light QR codes
+            var code = jsQR(imageData.data, vw, vh, { inversionAttempts: 'attemptBoth' });
+            if (code && code.data) {
+              onQRFound(code.data);
+            }
+          }, 150);
+
+          onInterval(scanId);
+        };
+
+        // Trigger load if metadata already available (e.g. cached stream)
+        if (video.readyState >= 2) {
+          video.onloadedmetadata();
+        }
       })
-      .catch(() => tryNext(idx + 1)); // try next constraint on failure
+      .catch(function() {
+        tryConstraint(idx + 1);
+      });
   }
 
-  tryNext(0);
+  tryConstraint(0);
 }
 
 /**
  * Generic camera stopper.
  */
 function stopCameraScanner(stream, intervalId, statusId, startBtnId, stopBtnId, videoId) {
-  if (stream) stream.getTracks().forEach(t => t.stop());
   if (intervalId) clearInterval(intervalId);
-  const vid = document.getElementById(videoId);
-  if (vid) vid.srcObject = null;
-  const startBtn = document.getElementById(startBtnId);
-  const stopBtn  = document.getElementById(stopBtnId);
+  if (stream) {
+    stream.getTracks().forEach(function(t) { try { t.stop(); } catch(e){} });
+  }
+  var vid = document.getElementById(videoId);
+  if (vid) { vid.pause(); vid.srcObject = null; }
+  var startBtn = document.getElementById(startBtnId);
+  var stopBtn  = document.getElementById(stopBtnId);
   if (startBtn) startBtn.style.display = 'flex';
   if (stopBtn)  stopBtn.style.display  = 'none';
-  const statusEl = document.getElementById(statusId);
+  var statusEl = document.getElementById(statusId);
   if (statusEl) {
     statusEl.textContent = '📷 Tap button to start camera';
     statusEl.classList.remove('ready');
