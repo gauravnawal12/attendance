@@ -14389,7 +14389,7 @@ function initCameraScanner(videoId, canvasId, statusId, startBtnId, stopBtnId, o
   statusEl.textContent = '⏳ Starting camera…';
 
   // Simple single constraint — just ask for video, no facingMode fighting
-  navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+  navigator.mediaDevices.getUserMedia({ video: false, audio: false })
     .then(function(stream) {
       onStream(stream);
       vid.srcObject = stream;
