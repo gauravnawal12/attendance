@@ -109,14 +109,20 @@ async function loadRemoteConfig() {
    ════════════════════════════════════════════════════════════════════ */
 const GSheet = {
   /**
-   * Returns true if Google Sheets is configured.
-   * Configuration comes from config.json (scriptUrl) OR manually saved URL.
+   * Returns true if Sheets integration is available.
+   * The actual Apps Script URL lives in Netlify's APPS_SCRIPT_URL env var — never in the browser.
+   * We check by pinging /api — if the function exists, Sheets is configured.
+   * For simplicity, we return true if config.json has a scriptUrl OR if manually set.
+   * The proxy itself will return a clear error if APPS_SCRIPT_URL isn't set in Netlify.
    */
   isConfigured() {
-    const cfgUrl = APP_CONFIG?.googleSheets?.scriptUrl;
+    // If config.json has a scriptUrl, Sheets is configured
+    const cfgUrl = APP_CONFIG && APP_CONFIG.googleSheets && APP_CONFIG.googleSheets.scriptUrl;
     if (cfgUrl && cfgUrl.includes('script.google.com')) return true;
+    // If manually saved
     const manUrl = Cache.get('apiUrl', null);
-    return !!(manUrl && manUrl.includes('script.google.com'));
+    if (manUrl && manUrl.includes('script.google.com')) return true;
+    return false;
   },
 
   /**
