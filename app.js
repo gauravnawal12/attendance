@@ -125,14 +125,13 @@ const GSheet = {
    * @returns {Promise<any>}
    */
   async call(action, body = {}) {
+    // Apps Script CORS only works reliably with GET requests from external origins.
+    // We encode the payload as a URL-safe base64 string in a 'payload' query param.
     const url = this.url();
     if (!url) throw new Error('API not configured — set scriptUrl in config.json or Settings');
-    const resp = await fetch(url + '?action=' + action, {
-      method:   'POST',
-      headers:  { 'Content-Type': 'application/json' },
-      body:     JSON.stringify(body),
-      redirect: 'follow'
-    });
+    const payload = btoa(unescape(encodeURIComponent(JSON.stringify(body))));
+    const qs      = 'action=' + encodeURIComponent(action) + '&payload=' + encodeURIComponent(payload);
+    const resp    = await fetch(url + '?' + qs, { redirect: 'follow' });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const json = await resp.json();
     if (!json.ok) throw new Error(json.error || 'API error');
@@ -203,11 +202,11 @@ async function initApp() {
   if (GSheet.isConfigured()) {
     try {
       showGlobalStatus('⏳ Syncing with Google Sheets…');
+      // Load employees + settings + team names in one call
       const all = await GSheet.get('getAll');
       if (Array.isArray(all.employees)) Cache.set('employees', all.employees);
       if (all.settings && Object.keys(all.settings).length) {
         const s = all.settings;
-        // Sheets settings only applied if config.json doesn't have shift defined
         if (!APP_CONFIG?.shift) {
           Cache.set('settings', {
             start:       s.start       || SHIFT_DEFAULT.start,
@@ -218,6 +217,21 @@ async function initApp() {
         }
       }
       if (all.teamNames && !APP_CONFIG?.teams) Cache.set('teamNames', all.teamNames);
+
+      // Also pull today's attendance so reports are current on any device
+      const today = new Date().toISOString().split('T')[0];
+      try {
+        const todayAtt = await GSheet.get('getAttendance', { date: today });
+        if (Array.isArray(todayAtt) && todayAtt.length) {
+          // Merge today's records from Sheets with any locally-pending records
+          const local   = Cache.get('attendance', []);
+          const localIds = new Set(local.map(r => r.id));
+          const merged  = [...local];
+          todayAtt.forEach(r => { if (!localIds.has(r.id)) merged.push(r); });
+          Cache.set('attendance', merged);
+        }
+      } catch(e) { /* non-critical — today's attendance just won't be pre-loaded */ }
+
       showGlobalStatus('');
     } catch(err) {
       showGlobalStatus('⚠ Sheets offline — using cached data');
@@ -320,6 +334,21 @@ async function doLogin() {
   document.getElementById('loginPass').value = '';
 
   // Route to the correct screen
+  // After login: ensure employee list is fresh from Sheets
+  // This is the key fix — Guard/Supervisor get employees even with empty local cache
+  if (GSheet.isConfigured()) {
+    GSheet.get('getEmployees')
+      .then(fresh => {
+        if (Array.isArray(fresh) && fresh.length) {
+          Cache.set('employees', fresh);
+          // Refresh any UI that's already showing
+          if (typeof renderEmployeeList === 'function') renderEmployeeList();
+          if (typeof renderSupTeam      === 'function') renderSupTeam();
+        }
+      })
+      .catch(e => console.warn('Post-login employee refresh failed:', e.message));
+  }
+
   if (user.role === 'admin') {
     document.getElementById('adminAvatar').textContent = user.name[0].toUpperCase();
     showScreen('adminScreen');
@@ -762,7 +791,7 @@ var pendingScan = null;
  * Instead of auto-determining action, shows a manual action picker.
  * Guard/Supervisor taps Check In / Check Out / Break Start / Break End.
  */
-function processScan(raw, scannedBy) {
+async function processScan(raw, scannedBy) {
   // Debounce: ignore same QR within 4 seconds
   const now = Date.now();
   if (raw === lastScannedId && now - lastScanTime < 4000) return;
@@ -773,8 +802,25 @@ function processScan(raw, scannedBy) {
   try { payload = JSON.parse(raw); }
   catch { showToast('⚠ Invalid QR code'); return; }
 
-  const emps = Store.get('employees', []);
-  const emp  = emps.find(e => e.id === payload.id);
+  let emps = Cache.get('employees', []);
+  let emp  = emps.find(e => e.id === payload.id);
+
+  // If not found locally and Sheets is configured, do a live fetch
+  // This handles the case where cache is stale or empty (e.g. first load on phone)
+  if (!emp && GSheet.isConfigured()) {
+    showToast('⏳ Looking up employee…', 3000);
+    try {
+      const fresh = await GSheet.get('getEmployees');
+      if (Array.isArray(fresh) && fresh.length) {
+        Cache.set('employees', fresh);           // update local cache
+        emps = fresh;
+        emp  = fresh.find(e => e.id === payload.id);
+      }
+    } catch(e) {
+      console.warn('Live employee fetch failed:', e.message);
+    }
+  }
+
   if (!emp) { showToast('⚠ Employee not found: ' + payload.id); return; }
 
   // Store pending context
@@ -833,7 +879,7 @@ function processScan(raw, scannedBy) {
  * Records attendance and shows result sheet.
  * @param {string} type - 'check-in' | 'check-out' | 'break-start' | 'break-end'
  */
-function confirmAction(type) {
+async function confirmAction(type) {
   if (!pendingScan) return;
   closeOverlay('actionPickerOverlay');
 
@@ -842,7 +888,22 @@ function confirmAction(type) {
 
   const dateStr   = todayStr();
   const timeStr   = new Date().toTimeString().slice(0, 8);
-  const att       = Store.get('attendance', []);
+
+  // Pull latest records for this employee from Sheets before saving
+  // Prevents conflicts when multiple devices scan the same employee
+  if (GSheet.isConfigured()) {
+    try {
+      const sheetAtt = await GSheet.get('getAttendance', { date: dateStr });
+      if (Array.isArray(sheetAtt)) {
+        const local    = Cache.get('attendance', []);
+        const localIds = new Set(local.map(r => r.id));
+        sheetAtt.forEach(r => { if (!localIds.has(r.id)) local.push(r); });
+        Cache.set('attendance', local);
+      }
+    } catch(e) { /* proceed with cached data if Sheets unreachable */ }
+  }
+
+  const att       = Cache.get('attendance', []);
   const todayRecs = att.filter(r => r.empId === emp.id && r.date === dateStr);
 
   const record = {
