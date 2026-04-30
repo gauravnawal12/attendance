@@ -204,7 +204,16 @@ async function initApp() {
       showGlobalStatus('⏳ Syncing with Google Sheets…');
       // Load employees + settings + team names in one call
       const all = await GSheet.get('getAll');
-      if (Array.isArray(all.employees)) Cache.set('employees', all.employees);
+      // Only replace local employees if Sheet has data — never wipe local with empty Sheet
+      const sheetEmps = Array.isArray(all.employees) ? all.employees : [];
+      const localEmps = Cache.get('employees', []);
+      if (sheetEmps.length > 0) {
+        Cache.set('employees', sheetEmps);
+      } else if (localEmps.length > 0) {
+        // Sheet empty but local has data — push local to Sheet silently
+        GSheet.call('importEmployees', { employees: localEmps })
+          .catch(e => console.warn('Auto-push to Sheet failed:', e.message));
+      }
       if (all.settings && Object.keys(all.settings).length) {
         const s = all.settings;
         if (!APP_CONFIG?.shift) {
@@ -2473,12 +2482,25 @@ async function testSheetsConnection() {
 
   try {
     const all = await GSheet.get('getAll');
-    const empCount = Array.isArray(all.employees) ? all.employees.length : '?';
-    el.textContent = '✅ Connected! Found ' + empCount + ' employee(s) in Google Sheet.';
+    const sheetEmpCount = Array.isArray(all.employees) ? all.employees.length : 0;
+    const localEmpCount = Cache.get('employees', []).length;
+
+    el.textContent = '✅ Connected! Sheet has ' + sheetEmpCount + ' employee(s). Local cache has ' + localEmpCount + '.';
     el.style.color = '#059669';
-    // Refresh local cache with Sheets data
-    if (Array.isArray(all.employees)) Cache.set('employees', all.employees);
-    renderEmployeeList();
+
+    // SAFE MERGE: only update local cache if Sheet has MORE records than local.
+    // Never overwrite local data with an empty or smaller Sheet.
+    // Use Push (⬆) to send local data to Sheet, or Pull (⬇) to replace local with Sheet.
+    if (Array.isArray(all.employees) && sheetEmpCount > localEmpCount) {
+      Cache.set('employees', all.employees);
+      renderEmployeeList();
+      el.textContent += ' — local cache updated from Sheet.';
+    } else if (sheetEmpCount === 0 && localEmpCount > 0) {
+      el.textContent += ' — Sheet is empty. Use ⬆ Push to upload your local employees.';
+      el.style.color = '#d97706';
+    } else if (sheetEmpCount > 0 && sheetEmpCount <= localEmpCount) {
+      el.textContent += ' — local data kept (same or more records). Use ⬇ Pull to force sync from Sheet.';
+    }
   } catch(err) {
     el.textContent = '❌ Connection failed: ' + err.message + ' — check URL and deployment settings.';
     el.style.color = '#dc2626';
@@ -2517,6 +2539,10 @@ async function pushLocalToSheets() {
 async function pullSheetsToLocal() {
   if (!GSheet.isConfigured()) {
     showToast('⚠ Configure Sheets URL first'); return;
+  }
+  const localCount = Cache.get('employees', []).length;
+  if (localCount > 0) {
+    if (!confirm('Pull from Sheets? This will REPLACE your ' + localCount + ' local employee(s) with whatever is in the Sheet. Make sure you have pushed your data first.')) return;
   }
   const el = document.getElementById('sheetsTestResult');
   el.textContent = '⏳ Pulling from Sheets…';
