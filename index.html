@@ -13122,6 +13122,20 @@ body::after {
   color: #065f46;
 }
 
+.action-pick-btn {
+  padding: 18px 12px;
+  border-radius: var(--radius-md);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  letter-spacing: 0.3px;
+}
+.action-pick-btn:hover  { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.action-pick-btn:active { transform: translateY(0); }
+.action-pick-btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
 /* ══════════════════════════════════════════════════
    SCAN RESULT POPUP
    ══════════════════════════════════════════════════ */
@@ -13534,7 +13548,7 @@ table.report tr:hover td { background: var(--pastel-amber); }
     <div class="creds-hint">
       <strong>Admin:</strong> admin / admin123<br>
       <strong>Guard:</strong> guard / guard123<br>
-      <strong>Supervisors:</strong> sup1 / sup123 · sup2 / sup123 · sup3 / sup123
+      <strong>Supervisor:</strong> supervisor / sup123 <em style="font-size:11px">(shared across devices)</em>
     </div>
   </div>
 </div>
@@ -13645,12 +13659,12 @@ table.report tr:hover td { background: var(--pastel-amber); }
           <input id="efDept" type="text" placeholder="Production, Packaging…">
         </div>
         <div class="field">
-          <label>Assigned Supervisor</label>
+          <label>Assigned Team <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
           <select id="efSupervisor">
-            <option value="">— None / General —</option>
-            <option value="sup1">Supervisor 1</option>
-            <option value="sup2">Supervisor 2</option>
-            <option value="sup3">Supervisor 3</option>
+            <option value="">— No Team / General —</option>
+            <option value="teamA">Team A</option>
+            <option value="teamB">Team B</option>
+            <option value="teamC">Team C</option>
           </select>
         </div>
         <div class="field">
@@ -13687,13 +13701,14 @@ table.report tr:hover td { background: var(--pastel-amber); }
         <button class="tab-btn"        onclick="reportTabSwitch('monthly')" id="rTab-monthly">Monthly</button>
       </div>
 
-      <!-- Scanned-by filter (Guard vs Supervisor) -->
-      <div class="tabs" id="scannerFilterTabs" style="margin-top:-10px">
-        <button class="tab-btn active" onclick="setScannerFilter('all')"      id="sF-all">All</button>
-        <button class="tab-btn"        onclick="setScannerFilter('guard')"    id="sF-guard">Guard</button>
-        <button class="tab-btn"        onclick="setScannerFilter('sup1')"     id="sF-sup1">Sup 1</button>
-        <button class="tab-btn"        onclick="setScannerFilter('sup2')"     id="sF-sup2">Sup 2</button>
-        <button class="tab-btn"        onclick="setScannerFilter('sup3')"     id="sF-sup3">Sup 3</button>
+      <!-- Scanned-by filter -->
+      <div class="tabs" id="scannerFilterTabs" style="margin-top:-10px;flex-wrap:wrap">
+        <button class="tab-btn active" onclick="setScannerFilter('all')"        id="sF-all">All</button>
+        <button class="tab-btn"        onclick="setScannerFilter('guard')"      id="sF-guard">Guard Only</button>
+        <button class="tab-btn"        onclick="setScannerFilter('supervisor')" id="sF-supervisor">Supervisor Only</button>
+        <button class="tab-btn"        onclick="setScannerFilter('teamA')"      id="sF-teamA">Team A</button>
+        <button class="tab-btn"        onclick="setScannerFilter('teamB')"      id="sF-teamB">Team B</button>
+        <button class="tab-btn"        onclick="setScannerFilter('teamC')"      id="sF-teamC">Team C</button>
       </div>
 
       <!-- Daily report -->
@@ -13729,6 +13744,27 @@ table.report tr:hover td { background: var(--pastel-amber); }
     <div class="page" id="aP-settings">
       <p class="section-heading">Settings</p>
       <p class="section-sub">System configuration</p>
+
+      <!-- Team Names Card -->
+      <div class="card">
+        <div class="card-title">👥 Team Names</div>
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Customize your 3 team names. These appear in employee assignment and reports.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div class="field">
+            <label>Team A Name</label>
+            <input id="sTeamA" type="text" placeholder="Team A">
+          </div>
+          <div class="field">
+            <label>Team B Name</label>
+            <input id="sTeamB" type="text" placeholder="Team B">
+          </div>
+          <div class="field">
+            <label>Team C Name</label>
+            <input id="sTeamC" type="text" placeholder="Team C">
+          </div>
+        </div>
+        <button class="btn btn-navy" onclick="saveTeamNames()">Save Team Names</button>
+      </div>
 
       <div class="card">
         <div class="card-title">⏰ Shift Configuration</div>
@@ -13924,7 +13960,48 @@ table.report tr:hover td { background: var(--pastel-amber); }
 </div><!-- /supervisorScreen -->
 
 <!-- ══════════════════════════════════════════════════
-     SCAN RESULT BOTTOM SHEET
+     ACTION PICKER — shown after QR scan
+     Guard/Supervisor selects the action manually
+     ══════════════════════════════════════════════════ -->
+<div class="overlay" id="actionPickerOverlay">
+  <div class="sheet">
+    <div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">MARK ATTENDANCE</div>
+    <div class="result-name" id="apEmpName">Employee Name</div>
+    <div class="result-id" id="apEmpId">EMP1001 · Department</div>
+
+    <!-- Today's timeline so guard knows current state -->
+    <div id="apTimeline" style="margin:14px 0"></div>
+
+    <!-- Action buttons — guard taps the correct one -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <button class="action-pick-btn" id="apBtnIn"
+        onclick="confirmAction('check-in')"
+        style="background:var(--pastel-green);border:2px solid #a7f3d0;color:#065f46">
+        ✅ Check In
+      </button>
+      <button class="action-pick-btn" id="apBtnOut"
+        onclick="confirmAction('check-out')"
+        style="background:var(--pastel-rose);border:2px solid #fbcfe8;color:#9d174d">
+        🚪 Check Out
+      </button>
+      <button class="action-pick-btn" id="apBtnBreakStart"
+        onclick="confirmAction('break-start')"
+        style="background:var(--pastel-amber);border:2px solid #fde68a;color:#92400e">
+        ☕ Break Start
+      </button>
+      <button class="action-pick-btn" id="apBtnBreakEnd"
+        onclick="confirmAction('break-end')"
+        style="background:var(--pastel-sky);border:2px solid #bae6fd;color:#0369a1">
+        ▶️ Break End
+      </button>
+    </div>
+
+    <button class="btn btn-outline btn-full" onclick="cancelAction()">Cancel</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     SCAN RESULT — shown after action is confirmed
      ══════════════════════════════════════════════════ -->
 <div class="overlay" id="scanResultOverlay">
   <div class="sheet">
@@ -13938,10 +14015,7 @@ table.report tr:hover td { background: var(--pastel-amber); }
       <span class="result-supervisor" id="srSupLabel" style="display:none"></span>
     </div>
     <div class="result-time" id="srTime"></div>
-
-    <!-- Today's scan timeline for this employee -->
     <div id="srTimeline" style="margin-bottom:20px"></div>
-
     <button class="btn btn-navy btn-full" onclick="closeScanResult()">Continue Scanning</button>
   </div>
 </div>
@@ -14001,11 +14075,9 @@ function initDB() {
   // Default user accounts (Admin + Guard + 3 Supervisors)
   if (!Store.get('users')) {
     Store.set('users', [
-      { id: 'admin', pass: 'admin123', role: 'admin',      name: 'Administrator' },
-      { id: 'guard', pass: 'guard123', role: 'guard',      name: 'Gate Guard' },
-      { id: 'sup1',  pass: 'sup123',  role: 'supervisor',  name: 'Supervisor 1', label: 'Supervisor 1' },
-      { id: 'sup2',  pass: 'sup123',  role: 'supervisor',  name: 'Supervisor 2', label: 'Supervisor 2' },
-      { id: 'sup3',  pass: 'sup123',  role: 'supervisor',  name: 'Supervisor 3', label: 'Supervisor 3' }
+      { id: 'admin',      pass: 'admin123', role: 'admin',      name: 'Administrator' },
+      { id: 'guard',      pass: 'guard123', role: 'guard',      name: 'Gate Guard' },
+      { id: 'supervisor', pass: 'sup123',   role: 'supervisor', name: 'Supervisor',   label: 'Supervisor' }
     ]);
   }
   if (!Store.get('employees'))  Store.set('employees', []);
@@ -14113,11 +14185,12 @@ function adminNav(page) {
 
   // Trigger data refresh when entering each section
   if (page === 'dashboard') refreshDashboard();
-  if (page === 'employees') renderEmployeeList();
+  if (page === 'employees') { renderEmployeeList(); updateTeamDropdown(); }
   if (page === 'reports') {
     const today = todayStr();
     document.getElementById('rDailyDate').value = today;
     document.getElementById('rMonthPicker').value = today.slice(0, 7);
+    updateReportFilterLabels();
     renderDailyReport();
   }
   if (page === 'settings') loadSettings();
@@ -14156,7 +14229,7 @@ function addEmployee() {
   const phone  = document.getElementById('efPhone').value.trim();
   const errEl  = document.getElementById('empFormError');
 
-  if (!first || !last) { errEl.textContent = 'First and last name are required.'; return; }
+  if (!first) { errEl.textContent = 'First name is required.'; return; }
 
   const counter = Store.get('empCounter', 1000) + 1;
   Store.set('empCounter', counter);
@@ -14165,7 +14238,7 @@ function addEmployee() {
     id:         'EMP' + counter,
     firstName:  first,
     lastName:   last,
-    name:       first + ' ' + last,
+    name:       last ? first + ' ' + last : first,
     dept:       dept || 'General',
     supervisor: supId || '',   // Which supervisor this employee belongs to
     phone:      phone,
@@ -14240,6 +14313,16 @@ function deleteEmployee(empId) {
 
 /** Returns human-readable supervisor label for a supervisor ID. */
 function getSupervisorLabel(supId) {
+  if (!supId) return '—';
+  // Use custom team names from settings
+  const n = Store.get('teamNames', { teamA: 'Team A', teamB: 'Team B', teamC: 'Team C' });
+  if (supId === 'teamA') return n.teamA;
+  if (supId === 'teamB') return n.teamB;
+  if (supId === 'teamC') return n.teamC;
+  if (supId === 'supervisor') return 'Supervisor';
+  // Legacy fallback
+  const legacyLabels = { 'sup1': 'Supervisor 1', 'sup2': 'Supervisor 2', 'sup3': 'Supervisor 3' };
+  if (legacyLabels[supId]) return legacyLabels[supId];
   const users = Store.get('users', []);
   const s = users.find(u => u.id === supId);
   return s ? s.label || s.name : supId;
@@ -14389,10 +14472,14 @@ function initCameraScanner(videoId, canvasId, statusId, startBtnId, stopBtnId, o
   statusEl.textContent = '⏳ Starting camera…';
 
   // Simple single constraint — just ask for video, no facingMode fighting
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }
-  },
-  audio: false
-})
+  navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: 'environment' },  // rear camera on phones, webcam on laptops
+        width:  { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    })
     .then(function(stream) {
       onStream(stream);
       vid.srcObject = stream;
@@ -14497,14 +14584,21 @@ function stopCameraScanner(stream, intervalId, statusId, startBtnId, stopBtnId, 
  * @param {string} raw       - Raw QR string (JSON payload)
  * @param {string} scannedBy - User ID of who scanned (guard | sup1 | sup2 | sup3)
  */
+// Pending scan state — holds employee + scannedBy while guard picks action
+var pendingScan = null;
+
+/**
+ * processScan — called when QR is decoded.
+ * Instead of auto-determining action, shows a manual action picker.
+ * Guard/Supervisor taps Check In / Check Out / Break Start / Break End.
+ */
 function processScan(raw, scannedBy) {
-  // Debounce: ignore same QR within 4 seconds to prevent duplicate records
+  // Debounce: ignore same QR within 4 seconds
   const now = Date.now();
   if (raw === lastScannedId && now - lastScanTime < 4000) return;
   lastScannedId = raw;
   lastScanTime  = now;
 
-  // Parse QR payload
   let payload;
   try { payload = JSON.parse(raw); }
   catch { showToast('⚠ Invalid QR code'); return; }
@@ -14513,30 +14607,74 @@ function processScan(raw, scannedBy) {
   const emp  = emps.find(e => e.id === payload.id);
   if (!emp) { showToast('⚠ Employee not found: ' + payload.id); return; }
 
-  // Determine next action based on today's existing records
+  // Store pending context
+  pendingScan = { emp, scannedBy };
+
+  // Show today's existing records in the picker
   const dateStr   = todayStr();
-  const timeStr   = new Date().toTimeString().slice(0, 8);
   const att       = Store.get('attendance', []);
   const todayRecs = att.filter(r => r.empId === emp.id && r.date === dateStr);
   const lastRec   = todayRecs.at(-1);
 
-  let type, emoji, actionLabel, actionCls;
+  // Populate action picker
+  document.getElementById('apEmpName').textContent = emp.name;
+  document.getElementById('apEmpId').textContent   = emp.id + ' · ' + emp.dept;
 
-  if (!lastRec || lastRec.type === 'check-out') {
-    // No record today, or already checked out → new check-in
-    type = 'check-in'; emoji = '✅'; actionLabel = 'Check In'; actionCls = 'badge-in';
-  } else if (lastRec.type === 'check-in' || lastRec.type === 'break-end') {
-    // Currently working → start break
-    type = 'break-start'; emoji = '☕'; actionLabel = 'Break Start'; actionCls = 'badge-break';
-  } else if (lastRec.type === 'break-start') {
-    // On break → end break
-    type = 'break-end'; emoji = '▶️'; actionLabel = 'Break End'; actionCls = 'badge-in';
-  } else {
-    // Fallback → check-out
-    type = 'check-out'; emoji = '🚪'; actionLabel = 'Check Out'; actionCls = 'badge-out';
-  }
+  // Show timeline of today's records
+  const labels   = { 'check-in': 'Check In', 'check-out': 'Check Out', 'break-start': 'Break Start', 'break-end': 'Break End' };
+  const dotClass = { 'check-in': 'in', 'check-out': 'out', 'break-start': 'break', 'break-end': 'in' };
+  const tlHtml   = todayRecs.length
+    ? '<div class="timeline">' + todayRecs.map(r =>
+        '<div class="tl-item"><div class="tl-dot ' + (dotClass[r.type]||'in') + '"></div>' +
+        '<span class="tl-time">' + r.time + '</span> <span class="tl-label">' + (labels[r.type]||r.type) + '</span></div>'
+      ).join('') + '</div>'
+    : '<div style="font-size:12px;color:var(--text-muted);padding:4px 0">No records yet today</div>';
+  document.getElementById('apTimeline').innerHTML = tlHtml;
 
-  // Save attendance record
+  // Smart button highlighting — suggest the most likely next action
+  // but ALL buttons remain enabled so guard can choose freely
+  const allBtns = ['apBtnIn','apBtnOut','apBtnBreakStart','apBtnBreakEnd'];
+  allBtns.forEach(id => {
+    var btn = document.getElementById(id);
+    btn.style.opacity = '0.6';
+    btn.style.transform = 'scale(0.97)';
+  });
+
+  // Determine suggested action based on last record
+  let suggested = 'apBtnIn';
+  if (!lastRec || lastRec.type === 'check-out')                          suggested = 'apBtnIn';
+  else if (lastRec.type === 'check-in' || lastRec.type === 'break-end') suggested = 'apBtnOut';
+  else if (lastRec.type === 'break-start')                               suggested = 'apBtnBreakEnd';
+
+  // Highlight suggested button
+  const sBtn = document.getElementById(suggested);
+  sBtn.style.opacity   = '1';
+  sBtn.style.transform = 'scale(1.03)';
+  sBtn.style.boxShadow = '0 4px 16px rgba(0,0,0,0.15)';
+
+  // Haptic
+  if (navigator.vibrate) navigator.vibrate(60);
+
+  openOverlay('actionPickerOverlay');
+}
+
+/**
+ * confirmAction — called when guard taps one of the 4 action buttons.
+ * Records attendance and shows result sheet.
+ * @param {string} type - 'check-in' | 'check-out' | 'break-start' | 'break-end'
+ */
+function confirmAction(type) {
+  if (!pendingScan) return;
+  closeOverlay('actionPickerOverlay');
+
+  const { emp, scannedBy } = pendingScan;
+  pendingScan = null;
+
+  const dateStr   = todayStr();
+  const timeStr   = new Date().toTimeString().slice(0, 8);
+  const att       = Store.get('attendance', []);
+  const todayRecs = att.filter(r => r.empId === emp.id && r.date === dateStr);
+
   const record = {
     id:        Date.now().toString(),
     empId:     emp.id,
@@ -14546,21 +14684,24 @@ function processScan(raw, scannedBy) {
     time:      timeStr,
     timestamp: new Date().toISOString(),
     type:      type,
-    scannedBy: scannedBy   // Tracks which guard/supervisor scanned this
+    scannedBy: scannedBy
   };
 
   att.push(record);
   Store.set('attendance', att);
 
-  // Show result popup
   showScanResult(emp, record, [...todayRecs, record], scannedBy);
-
-  // Refresh recent-scan lists
   renderGuardScans();
   renderSupScans();
 
-  // Haptic feedback
   if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
+}
+
+/** Cancel action picker — go back to scanning without saving anything. */
+function cancelAction() {
+  pendingScan   = null;
+  lastScannedId = null; // allow re-scan of same QR
+  closeOverlay('actionPickerOverlay');
 }
 
 /**
@@ -14796,8 +14937,15 @@ function refreshDashboard() {
  * @param {string} date  - Date string YYYY-MM-DD
  * @returns {object} { checkIn, checkOut, breakMins, workedHrs, status, progress }
  */
-function calcAttendance(empId, date) {
-  const att  = Store.get('attendance', []).filter(r => r.empId === empId && r.date === date);
+function calcAttendance(empId, date, scannedByFilter) {
+  scannedByFilter = scannedByFilter || scannerFilter || 'all';
+  let att = Store.get('attendance', []).filter(r => r.empId === empId && r.date === date);
+  // Separate guard vs supervisor records when filter is set
+  if (scannedByFilter === 'guard') {
+    att = att.filter(r => r.scannedBy === 'guard');
+  } else if (scannedByFilter === 'supervisor') {
+    att = att.filter(r => r.scannedBy === 'supervisor');
+  }
   const cfg  = Store.get('settings', SHIFT_DEFAULT);
 
   if (!att.length) return { checkIn: '—', checkOut: '—', breakMins: 0, workedHrs: 0, status: 'absent', progress: 0 };
@@ -14808,9 +14956,11 @@ function calcAttendance(empId, date) {
 
   if (!firstIn) return { checkIn: '—', checkOut: '—', breakMins: 0, workedHrs: 0, status: 'no-checkin', progress: 0 };
 
-  // Calculate explicit break durations
+  // Calculate explicit break durations from break-start/break-end pairs
   let breakMins = 0;
   let bStart    = null;
+  const hasBreakRecord = sorted.some(r => r.type === 'break-start' || r.type === 'break-end');
+
   sorted.forEach(r => {
     if (r.type === 'break-start') bStart = r.time;
     if (r.type === 'break-end' && bStart) {
@@ -14819,16 +14969,26 @@ function calcAttendance(empId, date) {
     }
   });
 
-  // Total elapsed time (check-in to check-out or now if still in)
+  // If only Check In + Check Out (no break records at all) → auto-deduct lunch
+  // This handles the "2 scan day" case: deduct lunchMins from settings (default 30)
+  if (!hasBreakRecord && lastOut) {
+    breakMins = cfg.lunchMins || 30;
+  }
+
+  // Total elapsed time (check-in to check-out, or to now if still working)
   const endTime   = lastOut ? lastOut.time : new Date().toTimeString().slice(0, 8);
   const totalMins = Math.max(0, timeToMins(endTime) - timeToMins(firstIn.time));
 
-  // Net working minutes = total − explicit breaks
-  const workedMins = Math.max(0, totalMins - breakMins);
-  const workedHrs  = (workedMins / 60).toFixed(2);
+  // Net working minutes = total elapsed − breaks
+  const rawWorkedMins = Math.max(0, totalMins - breakMins);
+
+  // Round to nearest quarter-hour (15 min)
+  // e.g. 8h 30m → 8.5, 8h 15m → 8.25, 8h 7m → 8.0, 8h 8m → 8.25
+  const roundedMins = Math.round(rawWorkedMins / 15) * 15;
+  const workedHrs   = roundedMins / 60;  // stored as decimal e.g. 8.5, 8.25, 8.75
 
   // Progress toward expected hours (0–100)
-  const progress   = Math.min(100, (workedMins / (cfg.expectedHrs * 60)) * 100);
+  const progress = Math.min(100, (workedHrs / cfg.expectedHrs) * 100);
 
   const status = !lastOut ? 'active' : 'complete';
 
@@ -14836,7 +14996,7 @@ function calcAttendance(empId, date) {
     checkIn:   firstIn.time,
     checkOut:  lastOut ? lastOut.time : '—',
     breakMins: Math.round(breakMins),
-    workedHrs: parseFloat(workedHrs),
+    workedHrs: workedHrs,   // decimal quarters: 8.0, 8.25, 8.5, 8.75, 9.0 …
     status,
     progress:  Math.round(progress)
   };
@@ -14948,7 +15108,7 @@ function renderDailyReport() {
           <td>${h.checkOut}</td>
           <td>${h.breakMins > 0 ? minsToHM(h.breakMins) : '—'}</td>
           <td>
-            <span class="hours-num ${hrCls}">${h.status === 'absent' ? '—' : h.workedHrs.toFixed(1) + 'h'}</span>
+            <span class="hours-num ${hrCls}">${h.status === 'absent' ? '—' : h.workedHrs.toFixed(2).replace(/\.00$/, '').replace(/0$/, '') + 'h'}</span>
             ${h.status !== 'absent' ? `
             <div class="progress-wrap">
               <div class="progress-bar"><div class="progress-fill" style="width:${h.progress}%"></div></div>
@@ -14974,68 +15134,120 @@ function renderMonthlyReport() {
   if (!month) return;
   activeReportMonth = month;
 
-  const [yr, mo] = month.split('-').map(Number);
+  const [yr, mo]  = month.split('-').map(Number);
   const daysCount = new Date(yr, mo, 0).getDate();
   const cfg       = Store.get('settings', SHIFT_DEFAULT);
   const emps      = getFilteredEmployees();
   const el        = document.getElementById('monthlyReportCard');
+  const monthName = new Date(yr, mo-1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 
   if (!emps.length) {
     el.innerHTML = '<div class="empty"><div class="empty-icon">👥</div><p>No employees for this filter</p></div>';
     return;
   }
 
-  const rows = emps.map(emp => {
-    let daysPresent = 0, totalHrs = 0, fullDays = 0;
-    for (let d = 1; d <= daysCount; d++) {
-      const date = `${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      const h    = calcAttendance(emp.id, date);
-      if (h.status !== 'absent') {
-        daysPresent++;
-        totalHrs += h.workedHrs;
-        if (h.workedHrs >= cfg.expectedHrs) fullDays++;
-      }
-    }
-    const avgHrs = daysPresent > 0 ? (totalHrs / daysPresent).toFixed(1) : 0;
-    return { emp, daysPresent, daysAbsent: daysCount - daysPresent, totalHrs: totalHrs.toFixed(1), avgHrs, fullDays };
+  // Build day headers — short day name + date number
+  // e.g. "Mon\n1", "Tue\n2" ...
+  const dayHeaders = [];
+  for (let d = 1; d <= daysCount; d++) {
+    const dt      = new Date(yr, mo - 1, d);
+    const dayName = dt.toLocaleString('en-IN', { weekday: 'short' });
+    const isSun   = dt.getDay() === 0;
+    const isSat   = dt.getDay() === 6;
+    dayHeaders.push({ d, dayName, isSun, isSat });
+  }
+
+  // Build data: one row per employee, one value per day
+  const empRows = emps.map(emp => {
+    let totalHrs = 0, daysPresent = 0, fullDays = 0;
+    const dayCells = dayHeaders.map(({ d, isSun, isSat }) => {
+      const date = yr + '-' + String(mo).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+      // Skip Sundays — show as holiday
+      if (isSun) return { val: '—', cls: 'day-holiday', hrs: 0 };
+      const h = calcAttendance(emp.id, date, scannerFilter);
+      if (h.status === 'absent') return { val: '—', cls: 'day-absent', hrs: 0 };
+      daysPresent++;
+      totalHrs += h.workedHrs;
+      if (h.workedHrs >= cfg.expectedHrs) fullDays++;
+      const cls = h.workedHrs >= cfg.expectedHrs ? 'day-full'
+                : h.workedHrs > 0               ? 'day-short'
+                :                                  'day-absent';
+      // Show as decimal quarters (8.0, 8.25, 8.5, 8.75) — already rounded in calcAttendance
+      return { val: h.workedHrs.toFixed(2).replace(/\.00$/, '').replace(/0$/, ''), cls, hrs: h.workedHrs };
+    });
+    const avgHrs = daysPresent > 0 ? (totalHrs / daysPresent).toFixed(1) : '0';
+    return { emp, dayCells, totalHrs: totalHrs.toFixed(1), daysPresent,
+             daysAbsent: daysCount - daysPresent, avgHrs, fullDays };
   });
 
-  const totalPresent = rows.reduce((s, r) => s + r.daysPresent, 0);
-  const avgPresence  = rows.length > 0 ? (totalPresent / rows.length).toFixed(1) : 0;
+  // Summary totals row
+  const totalPresent = empRows.reduce((s, r) => s + r.daysPresent, 0);
+  const avgPresence  = empRows.length > 0 ? (totalPresent / empRows.length).toFixed(1) : 0;
+
+  // Build column headers HTML
+  const thDays = dayHeaders.map(({ d, dayName, isSun, isSat }) => {
+    const wkCls = isSun ? 'style="background:#fecaca;color:#991b1b"'
+                : isSat ? 'style="background:#fef3c7;color:#92400e"'
+                : '';
+    return `<th ${wkCls} style="min-width:36px;text-align:center;padding:6px 4px">
+              <div style="font-size:9px;opacity:.7">${dayName}</div>
+              <div style="font-size:12px;font-weight:700">${d}</div>
+            </th>`;
+  }).join('');
+
+  // Build employee rows HTML
+  const tbodyHtml = empRows.map(({ emp, dayCells, totalHrs, daysPresent, daysAbsent, avgHrs }) => {
+    const cellsHtml = dayCells.map(cell => {
+      const bg = cell.cls === 'day-full'    ? 'background:#d1fae5;color:#065f46'
+               : cell.cls === 'day-short'   ? 'background:#fef3c7;color:#92400e'
+               : cell.cls === 'day-holiday' ? 'background:#f3e8ff;color:#6b21a8'
+               :                              'background:#f9fafb;color:#9ca3af';
+      return `<td style="text-align:center;padding:5px 2px;font-size:11px;font-weight:600;${bg}">${cell.val}</td>`;
+    }).join('');
+
+    const absColor = daysAbsent > 5 ? 'color:#dc2626;font-weight:700' : 'color:#6b7280';
+    return `<tr>
+      <td style="white-space:nowrap;padding:8px 12px;position:sticky;left:0;background:#fff;z-index:2;border-right:2px solid var(--border)">
+        <strong style="font-size:13px">${emp.name}</strong><br>
+        <span style="font-size:10px;color:var(--text-muted)">${emp.id} · ${emp.dept}</span>
+      </td>
+      ${cellsHtml}
+      <td style="text-align:center;padding:5px 8px;font-weight:700;color:var(--helix-navy);white-space:nowrap;border-left:2px solid var(--border)">${parseFloat(totalHrs).toFixed(2).replace(/\.00$/, '').replace(/0$/, '')}</td>
+      <td style="text-align:center;padding:5px 8px;color:#059669;font-weight:700">${daysPresent}</td>
+      <td style="text-align:center;padding:5px 8px;${absColor}">${daysAbsent}</td>
+    </tr>`;
+  }).join('');
 
   el.innerHTML = `
-    <div style="font-size:12px;font-weight:600;letter-spacing:1px;color:var(--text-muted);margin-bottom:16px;text-transform:uppercase">
-      ${new Date(yr, mo-1).toLocaleString('en-IN', { month: 'long', year: 'numeric' })}
-      · Avg Attendance: ${avgPresence} days
+    <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:1px">
+      ${monthName} &nbsp;·&nbsp; Avg Attendance: ${avgPresence} days
+      &nbsp;·&nbsp; Filter: ${scannerFilter === 'all' ? 'All Scanners' : scannerFilter === 'guard' ? 'Guard Only' : scannerFilter === 'supervisor' ? 'Supervisor Only' : getSupervisorLabel(scannerFilter)}
     </div>
-    <div class="table-wrap">
-    <table class="report">
-      <thead><tr>
-        <th>Employee</th>
-        <th>Department</th>
-        <th>Present</th>
-        <th>Absent</th>
-        <th>Full Days</th>
-        <th>Total Hrs</th>
-        <th>Avg Hrs/Day</th>
-      </tr></thead>
-      <tbody>
-      ${rows.map(({ emp, daysPresent, daysAbsent, totalHrs, avgHrs, fullDays }) => {
-        const avgNum = parseFloat(avgHrs);
-        const hrCls  = avgNum >= cfg.expectedHrs * 0.9 ? 'hours-full' : avgNum > 0 ? '' : 'hours-short';
-        return `<tr>
-          <td><strong>${emp.name}</strong><br><span style="font-size:11px;color:var(--text-muted)">${emp.id}</span></td>
-          <td>${emp.dept}</td>
-          <td style="color:var(--col-in);font-weight:600">${daysPresent}</td>
-          <td style="color:${daysAbsent > 5 ? 'var(--col-out)' : 'var(--text-muted)'};font-weight:600">${daysAbsent}</td>
-          <td>${fullDays}</td>
-          <td><span class="hours-num">${totalHrs}h</span></td>
-          <td><span class="hours-num ${hrCls}">${avgHrs}h</span></td>
-        </tr>`;
-      }).join('')}
-      </tbody>
-    </table></div>`;
+
+    <!-- Colour legend -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;font-size:11px">
+      <span style="background:#d1fae5;color:#065f46;padding:3px 8px;border-radius:4px;font-weight:600">Full day (≥${cfg.expectedHrs}h)</span>
+      <span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:4px;font-weight:600">Short day</span>
+      <span style="background:#f9fafb;color:#9ca3af;padding:3px 8px;border-radius:4px;font-weight:600">Absent</span>
+      <span style="background:#f3e8ff;color:#6b21a8;padding:3px 8px;border-radius:4px;font-weight:600">Sunday</span>
+    </div>
+
+    <div class="table-wrap" style="overflow-x:auto">
+    <table class="report" style="border-collapse:collapse;min-width:800px">
+      <thead>
+        <tr style="position:sticky;top:0;z-index:3">
+          <th style="position:sticky;left:0;z-index:4;min-width:160px;text-align:left;padding:10px 12px;background:var(--helix-navy)">Employee</th>
+          ${thDays}
+          <th style="min-width:60px;text-align:center;background:var(--helix-navy);border-left:2px solid rgba(255,255,255,.2)">Total Hrs</th>
+          <th style="min-width:44px;text-align:center;background:var(--helix-navy)">Present</th>
+          <th style="min-width:44px;text-align:center;background:var(--helix-navy)">Absent</th>
+        </tr>
+      </thead>
+      <tbody>${tbodyHtml}</tbody>
+    </table>
+    </div>`;
 }
+
 
 /* ────────────────────────────────────────────────────────────────
    REPORT FILTERING HELPERS
@@ -15047,12 +15259,34 @@ function renderMonthlyReport() {
  * If filter = 'guard', return employees checked in by guard.
  * If filter = 'supN', return employees assigned to that supervisor.
  */
+/**
+ * getFilteredEmployees — returns employee list based on active report filter.
+ * For 'guard' / 'supervisor' filters: returns ALL employees but calcAttendance
+ * will only count records scanned by that role.
+ * For team filters: returns only employees in that team.
+ */
 function getFilteredEmployees() {
   const emps = Store.get('employees', []);
-  if (scannerFilter === 'all')   return emps;
-  if (scannerFilter === 'guard') return emps; // Guard can scan any employee; filter in calc
-  // Supervisor filter — show only their assigned employees
+  if (scannerFilter === 'all')        return emps;
+  if (scannerFilter === 'guard')      return emps; // all employees, guard-only records filtered in calc
+  if (scannerFilter === 'supervisor') return emps; // all employees, supervisor-only records in calc
+  // Team filter — show only employees in that team
   return emps.filter(e => e.supervisor === scannerFilter);
+}
+
+/**
+ * Get attendance records for an employee on a date, optionally filtered by who scanned.
+ * scannedByFilter: 'all' | 'guard' | 'supervisor' | 'teamA' | 'teamB' | 'teamC'
+ */
+function getAttendanceRecords(empId, date, scannedByFilter) {
+  let recs = Store.get('attendance', []).filter(r => r.empId === empId && r.date === date);
+  if (scannedByFilter === 'guard') {
+    recs = recs.filter(r => r.scannedBy === 'guard');
+  } else if (scannedByFilter === 'supervisor') {
+    recs = recs.filter(r => r.scannedBy === 'supervisor');
+  }
+  // For team or 'all' filters, use all records regardless of scanner
+  return recs;
 }
 
 /* ────────────────────────────────────────────────────────────────
@@ -15130,111 +15364,94 @@ function exportMonthlyXLSX() {
   const month = document.getElementById('rMonthPicker').value;
   if (!month) { showToast('⚠ Select a month first'); return; }
 
-  const [yr, mo] = month.split('-').map(Number);
+  const [yr, mo]  = month.split('-').map(Number);
   const daysCount = new Date(yr, mo, 0).getDate();
   const cfg       = Store.get('settings', SHIFT_DEFAULT);
   const emps      = getFilteredEmployees();
   const monthName = new Date(yr, mo-1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  const filterLabel = scannerFilter === 'all' ? 'All Scanners'
+                    : scannerFilter === 'guard' ? 'Guard Only'
+                    : scannerFilter === 'supervisor' ? 'Supervisor Only'
+                    : getSupervisorLabel(scannerFilter);
 
   const wb = XLSX.utils.book_new();
 
-  // ── Sheet 1: Monthly Summary ──
+  // ── Sheet 1: Pivot — Employee rows × Date columns ──
+  // Header row: Employee | Dept | 1 | 2 | ... | 31 | Total Hrs | Present | Absent
+  const dayNums = [];
+  for (let d = 1; d <= daysCount; d++) dayNums.push(d);
+
+  const headerRow = ['Employee', 'Emp ID', 'Department', 'Team',
+    ...dayNums.map(d => {
+      const dt = new Date(yr, mo-1, d);
+      return dt.toLocaleString('en-IN', { weekday: 'short' }) + ' ' + d;
+    }),
+    'Total Hrs', 'Days Present', 'Days Absent', 'Full Days', 'Avg Hrs/Day'
+  ];
+
+  const dataRows = emps.map(emp => {
+    let totalHrs = 0, daysPresent = 0, fullDays = 0;
+    const dayCells = dayNums.map(d => {
+      const date = yr + '-' + String(mo).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+      const dt   = new Date(yr, mo-1, d);
+      if (dt.getDay() === 0) return 'Sun'; // Sunday
+      const h = calcAttendance(emp.id, date, scannerFilter);
+      if (h.status === 'absent') return '';
+      daysPresent++;
+      totalHrs += h.workedHrs;
+      if (h.workedHrs >= cfg.expectedHrs) fullDays++;
+      return h.workedHrs;
+    });
+
+    const avgHrs = daysPresent > 0 ? parseFloat((totalHrs / daysPresent).toFixed(2)) : 0;
+    return [
+      emp.name, emp.id, emp.dept, getSupervisorLabel(emp.supervisor || ''),
+      ...dayCells,
+      parseFloat(totalHrs.toFixed(2)), daysPresent, daysCount - daysPresent, fullDays, avgHrs
+    ];
+  });
+
+  const ws1 = XLSX.utils.aoa_to_sheet([
+    [`Helix Industries — Monthly Attendance — ${monthName} — Filter: ${filterLabel}`],
+    [],
+    headerRow,
+    ...dataRows
+  ]);
+
+  // Set column widths: name col wide, day cols narrow
+  ws1['!cols'] = [
+    { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 10 },
+    ...dayNums.map(() => ({ wch: 6 })),
+    { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws1, 'Monthly Pivot');
+
+  // ── Sheet 2: Summary (same as before) ──
   const summaryRows = emps.map(emp => {
-    let daysPresent = 0, totalHrs = 0, fullDays = 0;
+    let totalHrs = 0, daysPresent = 0, fullDays = 0;
     for (let d = 1; d <= daysCount; d++) {
-      const date = `${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      const h    = calcAttendance(emp.id, date);
-      if (h.status !== 'absent') {
-        daysPresent++;
-        totalHrs += h.workedHrs;
-        if (h.workedHrs >= cfg.expectedHrs) fullDays++;
-      }
+      const date = yr + '-' + String(mo).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+      if (new Date(yr, mo-1, d).getDay() === 0) continue;
+      const h = calcAttendance(emp.id, date, scannerFilter);
+      if (h.status !== 'absent') { daysPresent++; totalHrs += h.workedHrs; if (h.workedHrs >= cfg.expectedHrs) fullDays++; }
     }
     return {
-      'Employee ID':   emp.id,
-      'Name':          emp.name,
-      'Department':    emp.dept,
-      'Supervisor':    emp.supervisor ? getSupervisorLabel(emp.supervisor) : 'General',
-      'Days Present':  daysPresent,
-      'Days Absent':   daysCount - daysPresent,
-      'Full Days':     fullDays,
-      'Total Hrs':     parseFloat(totalHrs.toFixed(2)),
-      'Avg Hrs/Day':   daysPresent > 0 ? parseFloat((totalHrs / daysPresent).toFixed(2)) : 0,
-      'Expected Hrs/Day': cfg.expectedHrs
+      'Employee': emp.name, 'ID': emp.id, 'Department': emp.dept,
+      'Team': getSupervisorLabel(emp.supervisor || ''),
+      'Days Present': daysPresent, 'Days Absent': daysCount - daysPresent,
+      'Full Days': fullDays, 'Total Hrs': parseFloat(totalHrs.toFixed(2)),
+      'Avg Hrs/Day': daysPresent > 0 ? parseFloat((totalHrs/daysPresent).toFixed(2)) : 0
     };
   });
+  const ws2 = XLSX.utils.json_to_sheet(summaryRows);
+  ws2['!cols'] = [{wch:22},{wch:10},{wch:14},{wch:10},{wch:12},{wch:12},{wch:10},{wch:12},{wch:13}];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Summary');
 
-  const wsMonthly = XLSX.utils.json_to_sheet(summaryRows);
-  wsMonthly['!cols'] = [
-    {wch:12},{wch:22},{wch:16},{wch:16},{wch:13},{wch:12},{wch:10},{wch:12},{wch:13},{wch:15}
-  ];
-  // Add title row above
-  XLSX.utils.sheet_add_aoa(wsMonthly, [
-    ['Helix Industries — Monthly Attendance Report — ' + monthName],
-    ['Filter: ' + (scannerFilter === 'all' ? 'All Scanners' : scannerFilter === 'guard' ? 'Gate Guard' : getSupervisorLabel(scannerFilter))],
-    []
-  ], { origin: 'A1' });
-  XLSX.utils.book_append_sheet(wb, wsMonthly, 'Monthly Summary');
-
-  // ── Sheet 2: Day-by-Day Detail ──
-  // Columns: Employee | Date | Day | Check In | Check Out | Break | Hours | Full Day?
-  const dayRows = [];
-  for (let d = 1; d <= daysCount; d++) {
-    const date    = `${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const dayName = new Date(yr, mo-1, d).toLocaleString('en-IN', { weekday: 'short' });
-    emps.forEach(emp => {
-      const h = calcAttendance(emp.id, date);
-      dayRows.push({
-        'Date':         date,
-        'Day':          dayName,
-        'Employee ID':  emp.id,
-        'Name':         emp.name,
-        'Department':   emp.dept,
-        'Check In':     h.checkIn,
-        'Check Out':    h.checkOut,
-        'Break (min)':  h.breakMins || '',
-        'Net Hours':    h.status !== 'absent' ? h.workedHrs : 0,
-        'Full Day?':    h.status === 'absent' ? 'Absent' : (h.workedHrs >= cfg.expectedHrs ? 'Yes' : 'No')
-      });
-    });
-  }
-  const wsDayDetail = XLSX.utils.json_to_sheet(dayRows);
-  wsDayDetail['!cols'] = [
-    {wch:12},{wch:6},{wch:12},{wch:22},{wch:16},{wch:10},{wch:10},{wch:12},{wch:11},{wch:10}
-  ];
-  XLSX.utils.book_append_sheet(wb, wsDayDetail, 'Day-by-Day');
-
-  // ── Sheets 3–5: One per supervisor ──
-  ['sup1','sup2','sup3'].forEach(supId => {
-    const supEmps = Store.get('employees', []).filter(e => e.supervisor === supId);
-    if (!supEmps.length) return;
-
-    const supRows = supEmps.map(emp => {
-      let daysPresent = 0, totalHrs = 0;
-      for (let d = 1; d <= daysCount; d++) {
-        const date = `${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-        const h    = calcAttendance(emp.id, date);
-        if (h.status !== 'absent') { daysPresent++; totalHrs += h.workedHrs; }
-      }
-      return {
-        'Employee ID':  emp.id,
-        'Name':         emp.name,
-        'Department':   emp.dept,
-        'Days Present': daysPresent,
-        'Days Absent':  daysCount - daysPresent,
-        'Total Hrs':    parseFloat(totalHrs.toFixed(2)),
-        'Avg Hrs/Day':  daysPresent > 0 ? parseFloat((totalHrs / daysPresent).toFixed(2)) : 0
-      };
-    });
-
-    const wsS = XLSX.utils.json_to_sheet(supRows);
-    wsS['!cols'] = [{wch:12},{wch:22},{wch:16},{wch:13},{wch:12},{wch:12},{wch:13}];
-    XLSX.utils.book_append_sheet(wb, wsS, getSupervisorLabel(supId).replace(/\s+/g,'_'));
-  });
-
-  XLSX.writeFile(wb, `Helix_Monthly_Attendance_${month}_${scannerFilter}.xlsx`);
+  XLSX.writeFile(wb, `Helix_Monthly_${month}_${scannerFilter}.xlsx`);
   showToast('📊 Monthly XLSX exported!');
 }
+
 
 function printReport() { window.print(); }
 
@@ -15248,6 +15465,11 @@ function loadSettings() {
   document.getElementById('sShiftEnd').value    = s.end;
   document.getElementById('sLunchMins').value   = s.lunchMins;
   document.getElementById('sExpectedHrs').value = s.expectedHrs;
+  // Load custom team names
+  const n = Store.get('teamNames', { teamA: 'Team A', teamB: 'Team B', teamC: 'Team C' });
+  document.getElementById('sTeamA').value = n.teamA;
+  document.getElementById('sTeamB').value = n.teamB;
+  document.getElementById('sTeamC').value = n.teamC;
 }
 
 function saveSettings() {
@@ -15258,6 +15480,51 @@ function saveSettings() {
     expectedHrs: parseFloat(document.getElementById('sExpectedHrs').value) || 9
   });
   showToast('✅ Settings saved');
+}
+
+/** Save customized team names and refresh all UI that uses them. */
+function saveTeamNames() {
+  const names = {
+    teamA: document.getElementById('sTeamA').value.trim() || 'Team A',
+    teamB: document.getElementById('sTeamB').value.trim() || 'Team B',
+    teamC: document.getElementById('sTeamC').value.trim() || 'Team C'
+  };
+  Store.set('teamNames', names);
+  // Refresh employee form dropdown with new names
+  updateTeamDropdown();
+  // Refresh report filter buttons
+  updateReportFilterLabels();
+  showToast('✅ Team names saved');
+}
+
+/** Returns the display name for a team ID, reading custom names from storage. */
+function getTeamName(teamId) {
+  const names = Store.get('teamNames', { teamA: 'Team A', teamB: 'Team B', teamC: 'Team C' });
+  const map = { teamA: names.teamA, teamB: names.teamB, teamC: names.teamC };
+  return map[teamId] || teamId || '—';
+}
+
+/** Updates the employee assignment dropdown with current team names. */
+function updateTeamDropdown() {
+  const sel = document.getElementById('efSupervisor');
+  if (!sel) return;
+  const n = Store.get('teamNames', { teamA: 'Team A', teamB: 'Team B', teamC: 'Team C' });
+  sel.innerHTML =
+    '<option value="">— No Team / General —</option>' +
+    '<option value="teamA">' + n.teamA + '</option>' +
+    '<option value="teamB">' + n.teamB + '</option>' +
+    '<option value="teamC">' + n.teamC + '</option>';
+}
+
+/** Updates report filter tab labels to show custom team names. */
+function updateReportFilterLabels() {
+  const n = Store.get('teamNames', { teamA: 'Team A', teamB: 'Team B', teamC: 'Team C' });
+  var btnA = document.getElementById('sF-teamA');
+  var btnB = document.getElementById('sF-teamB');
+  var btnC = document.getElementById('sF-teamC');
+  if (btnA) btnA.textContent = n.teamA;
+  if (btnB) btnB.textContent = n.teamB;
+  if (btnC) btnC.textContent = n.teamC;
 }
 
 function changeAdminPassword() {
