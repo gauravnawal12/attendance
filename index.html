@@ -16138,6 +16138,35 @@ table.report tr:hover td { background: var(--pastel-amber); }
       <p class="section-heading">Settings</p>
       <p class="section-sub">System configuration</p>
 
+      <!-- Google Sheets Integration Card -->
+      <div class="card" id="sheetsConfigCard" style="border-color:#34a853;background:#f0fdf4">
+        <div class="card-title" style="color:#166534">☁ Google Sheets Integration</div>
+        <div id="sheetsStatusBanner" style="padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px;font-weight:600"></div>
+        <div id="configSourceBanner" style="padding:8px 14px;border-radius:8px;font-size:12px;margin-bottom:14px;background:#f0f7ff;color:#1e40af;border:1px solid #bfdbfe;display:none"></div>
+        <p style="font-size:12px;color:#374151;margin-bottom:14px;line-height:1.6">
+          Paste the <strong>Web App URL</strong> from your Google Apps Script deployment.<br>
+          All devices will then read and write from the same Google Sheet automatically.
+        </p>
+        <div class="field">
+          <label>Apps Script Web App URL</label>
+          <input id="sheetsApiUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec"
+            style="font-size:12px;font-family:monospace">
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-navy btn-sm" onclick="saveSheetsUrl()">Save URL</button>
+          <button class="btn btn-outline btn-sm" onclick="testSheetsConnection()">Test Connection</button>
+          <button class="btn btn-outline btn-sm" onclick="pushLocalToSheets()">⬆ Push All Local Data</button>
+          <button class="btn btn-outline btn-sm" onclick="pullSheetsToLocal()">⬇ Pull from Sheets</button>
+          <button class="btn btn-danger btn-sm" onclick="clearSheetsUrl()">Disconnect</button>
+        </div>
+        <div class="error-text" id="sheetsTestResult" style="margin-top:10px;min-height:18px"></div>
+
+        <!-- config.json live summary — auto-populated by renderConfigSummary() -->
+        <div id="configJsonSummary"
+          style="display:none;margin-top:14px;background:#f0f7ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px">
+        </div>
+      </div>
+
       <!-- Team Names Card -->
       <div class="card">
         <div class="card-title">👥 Team Names</div>
@@ -16192,6 +16221,37 @@ table.report tr:hover td { background: var(--pastel-amber); }
         </div>
         <button class="btn btn-navy" onclick="changeAdminPassword()">Update Password</button>
         <div class="error-text" id="sPassError"></div>
+      </div>
+
+      <!-- DATA BACKUP & RESTORE — share data across devices -->
+      <div class="card" style="border-color:#a7f3d0;background:#f0fdf4">
+        <div class="card-title" style="color:#065f46">🔄 Data Backup & Restore</div>
+        <p style="font-size:13px;color:#374151;margin-bottom:16px;line-height:1.6">
+          <strong>Employees added on one device are not visible on others.</strong><br>
+          Export all data from this device and import it on another to sync.
+        </p>
+
+        <!-- EXPORT -->
+        <div style="background:#fff;border-radius:10px;padding:14px;margin-bottom:12px;border:1px solid #a7f3d0">
+          <div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#065f46;margin-bottom:8px">Step 1 — Export from this device</div>
+          <p style="font-size:12px;color:#6b7280;margin-bottom:10px">Downloads a <code>.json</code> backup file containing all employees and attendance records.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-navy btn-sm" onclick="exportAllData()">⬇ Export All Data</button>
+            <button class="btn btn-outline btn-sm" onclick="exportEmployeesOnly()">👥 Export Employees Only</button>
+          </div>
+        </div>
+
+        <!-- IMPORT -->
+        <div style="background:#fff;border-radius:10px;padding:14px;border:1px solid #a7f3d0">
+          <div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#065f46;margin-bottom:8px">Step 2 — Import on other device</div>
+          <p style="font-size:12px;color:#6b7280;margin-bottom:10px">Open this app on the other device (phone/tablet), go to Settings and import the file. Existing data is merged — no duplicates.</p>
+          <div class="field" style="margin-bottom:10px">
+            <input type="file" id="restoreFileInput" accept=".json"
+              style="padding:9px;border:1.5px dashed #a7f3d0;border-radius:8px;cursor:pointer;background:#f0fdf4;width:100%;font-size:13px">
+          </div>
+          <button class="btn btn-navy btn-sm" onclick="importAllData()">⬆ Import from File</button>
+          <div class="error-text" id="restoreError" style="margin-top:8px"></div>
+        </div>
       </div>
 
       <div class="card danger-zone">
@@ -16448,6 +16508,154 @@ const SHIFT_DEFAULT = {
   expectedHrs: 9    // Net working hours expected per day
 };
 
+/* ════════════════════════════════════════════════════════════════════
+   GOOGLE SHEETS API LAYER
+   All data reads/writes go through GSheet.call() which hits the
+   Apps Script web endpoint. Results are also cached in localStorage
+   so the UI stays fast and works briefly if connection hiccups.
+   ════════════════════════════════════════════════════════════════════ */
+
+// ── Configuration — Admin sets this URL in Settings ──────────────────
+// Stored in localStorage under 'helix_apiUrl'
+// Falls back to localStorage-only mode if not configured (for testing)
+
+const Cache = {
+  get(k, def=null)  { try { return JSON.parse(localStorage.getItem('helix_'+k)) ?? def; } catch { return def; } },
+  set(k, v)        { localStorage.setItem('helix_'+k, JSON.stringify(v)); },
+  del(k)           { localStorage.removeItem('helix_'+k); }
+};
+
+// Keep backward compat — Store still used by auth/settings/teamNames locally
+const Store = Cache;
+
+/* ════════════════════════════════════════════════════════════════════
+   REMOTE CONFIG — fetched from config.json on every app load.
+   Hosted alongside index.html on Netlify.
+   Change config.json once → all devices pick it up automatically.
+   ════════════════════════════════════════════════════════════════════ */
+
+/** Holds the parsed config.json contents once loaded */
+let APP_CONFIG = null;
+
+/**
+ * loadRemoteConfig — fetches config.json from the same server as index.html.
+ * Uses cache-busting so Netlify always serves the latest version.
+ * Falls back gracefully if the file is missing or unreachable.
+ */
+async function loadRemoteConfig() {
+  try {
+    // ?v= cache-bust ensures fresh fetch, not a 304 from browser cache
+    const resp = await fetch('./config.json?v=' + Date.now(), {
+      cache: 'no-store'
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    APP_CONFIG = await resp.json();
+
+    // ── Apply config.json values into local cache ──────────────────
+
+    // 1. Apps Script URL — config.json is the source of truth
+    const scriptUrl = APP_CONFIG?.googleSheets?.scriptUrl;
+    if (scriptUrl && scriptUrl.includes('script.google.com')) {
+      Cache.set('apiUrl', scriptUrl);
+    }
+
+    // 2. Shift settings — merge with existing, config.json wins
+    if (APP_CONFIG?.shift) {
+      const s = APP_CONFIG.shift;
+      Cache.set('settings', {
+        start:       s.start       || SHIFT_DEFAULT.start,
+        end:         s.end         || SHIFT_DEFAULT.end,
+        lunchMins:   Number(s.lunchMins)   || SHIFT_DEFAULT.lunchMins,
+        expectedHrs: Number(s.expectedHrs) || SHIFT_DEFAULT.expectedHrs
+      });
+    }
+
+    // 3. Team names — config.json wins over local edits
+    if (APP_CONFIG?.teams) {
+      const t = APP_CONFIG.teams;
+      if (t.teamA || t.teamB || t.teamC) {
+        Cache.set('teamNames', {
+          teamA: t.teamA || 'Team A',
+          teamB: t.teamB || 'Team B',
+          teamC: t.teamC || 'Team C'
+        });
+      }
+    }
+
+    // 4. User passwords — allows central password rotation via config.json
+    if (APP_CONFIG?.users) {
+      const existing = Cache.get('users', []);
+      let changed = false;
+      Object.entries(APP_CONFIG.users).forEach(([uid, cfg]) => {
+        const user = existing.find(u => u.id === uid);
+        if (user && cfg.pass && user.pass !== cfg.pass) {
+          user.pass = cfg.pass;
+          changed   = true;
+        }
+      });
+      if (changed) Cache.set('users', existing);
+    }
+
+    console.log('✅ config.json loaded:', APP_CONFIG.version || '');
+  } catch (err) {
+    // Config file missing or network error — use whatever is in cache
+    console.warn('config.json not loaded:', err.message, '— using local cache');
+    APP_CONFIG = {};
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   GOOGLE SHEETS API LAYER
+   ════════════════════════════════════════════════════════════════════ */
+const GSheet = {
+  /** Returns the Apps Script URL — config.json takes priority over manual setting */
+  url() {
+    const cfgUrl = APP_CONFIG?.googleSheets?.scriptUrl;
+    if (cfgUrl && cfgUrl.includes('script.google.com')) return cfgUrl;
+    return Cache.get('apiUrl', null);
+  },
+
+  /** True if a valid URL is available */
+  isConfigured() { return !!this.url(); },
+
+  /**
+   * POST to the Apps Script API.
+   * @param {string} action - API action name
+   * @param {object} body   - JSON body
+   * @returns {Promise<any>}
+   */
+  async call(action, body = {}) {
+    const url = this.url();
+    if (!url) throw new Error('API not configured — set scriptUrl in config.json or Settings');
+    const resp = await fetch(url + '?action=' + action, {
+      method:   'POST',
+      headers:  { 'Content-Type': 'application/json' },
+      body:     JSON.stringify(body),
+      redirect: 'follow'
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const json = await resp.json();
+    if (!json.ok) throw new Error(json.error || 'API error');
+    return json.data;
+  },
+
+  /** GET-style API call (for reads) */
+  async get(action, params = {}) {
+    const url = this.url();
+    if (!url) throw new Error('API not configured');
+    const qs   = Object.entries({ action, ...params })
+                   .map(([k,v]) => k + '=' + encodeURIComponent(v)).join('&');
+    const resp = await fetch(url + '?' + qs, { redirect: 'follow' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const json = await resp.json();
+    if (!json.ok) throw new Error(json.error || 'API error');
+    return json.data;
+  }
+};
+
+// ── App state ─────────────────────────────────────────────────────────
+let APP_READY = false;  // true once initial data is loaded from Sheets
+
 /* ────────────────────────────────────────────────────────────────
    STORAGE HELPERS — thin wrapper around localStorage
    ──────────────────────────────────────────────────────────────── */
@@ -16464,21 +16672,82 @@ const Store = {
 /* ────────────────────────────────────────────────────────────────
    INITIALIZE DATABASE with default users and settings
    ──────────────────────────────────────────────────────────────── */
-function initDB() {
-  // Default user accounts (Admin + Guard + 3 Supervisors)
-  if (!Store.get('users')) {
-    Store.set('users', [
+/**
+ * initApp — called on page load.
+ * Loads data from Google Sheets into local cache if URL is configured.
+ * Falls back to localStorage-only if not configured.
+ */
+async function initApp() {
+  // Step 1 — Seed local defaults if first run
+  if (!Cache.get('users')) {
+    Cache.set('users', [
       { id: 'admin',      pass: 'admin123', role: 'admin',      name: 'Administrator' },
       { id: 'guard',      pass: 'guard123', role: 'guard',      name: 'Gate Guard' },
-      { id: 'supervisor', pass: 'sup123',   role: 'supervisor', name: 'Supervisor',   label: 'Supervisor' }
+      { id: 'supervisor', pass: 'sup123',   role: 'supervisor', name: 'Supervisor', label: 'Supervisor' }
     ]);
   }
-  if (!Store.get('employees'))  Store.set('employees', []);
-  if (!Store.get('attendance')) Store.set('attendance', []);
-  if (!Store.get('settings'))   Store.set('settings', SHIFT_DEFAULT);
-  if (!Store.get('empCounter')) Store.set('empCounter', 1000);
+  if (!Cache.get('settings'))   Cache.set('settings',   SHIFT_DEFAULT);
+  if (!Cache.get('teamNames'))  Cache.set('teamNames',  { teamA: 'Team A', teamB: 'Team B', teamC: 'Team C' });
+  if (!Cache.get('empCounter')) Cache.set('empCounter', 1000);
+  if (!Cache.get('employees'))  Cache.set('employees',  []);
+  if (!Cache.get('attendance')) Cache.set('attendance', []);
+
+  // Step 2 — Fetch config.json from server (applies URL, shift, teams, passwords centrally)
+  // This is what makes one config file control all devices
+  showGlobalStatus('⏳ Loading configuration…');
+  await loadRemoteConfig();
+
+  APP_READY = true;
+
+  // Step 3 — Load live data from Google Sheets (if configured)
+  if (GSheet.isConfigured()) {
+    try {
+      showGlobalStatus('⏳ Syncing with Google Sheets…');
+      const all = await GSheet.get('getAll');
+      if (Array.isArray(all.employees)) Cache.set('employees', all.employees);
+      if (all.settings && Object.keys(all.settings).length) {
+        const s = all.settings;
+        // Sheets settings only applied if config.json doesn't have shift defined
+        if (!APP_CONFIG?.shift) {
+          Cache.set('settings', {
+            start:       s.start       || SHIFT_DEFAULT.start,
+            end:         s.end         || SHIFT_DEFAULT.end,
+            lunchMins:   Number(s.lunchMins)   || SHIFT_DEFAULT.lunchMins,
+            expectedHrs: Number(s.expectedHrs) || SHIFT_DEFAULT.expectedHrs
+          });
+        }
+      }
+      if (all.teamNames && !APP_CONFIG?.teams) Cache.set('teamNames', all.teamNames);
+      showGlobalStatus('');
+    } catch(err) {
+      showGlobalStatus('⚠ Sheets offline — using cached data');
+      console.warn('Sheets load failed:', err.message);
+    }
+  } else {
+    showGlobalStatus('');
+  }
 }
-initDB();
+
+/** Dismissible status bar shown at top of app */
+function showGlobalStatus(msg) {
+  let bar = document.getElementById('globalStatusBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'globalStatusBar';
+    bar.style.cssText = [
+      'position:fixed','top:0','left:0','right:0','z-index:9999',
+      'padding:9px 16px','font-size:13px','font-weight:600',
+      'text-align:center','background:#fef3c7','color:#78350f',
+      'border-bottom:2px solid #fde68a'
+    ].join(';');
+    document.body.prepend(bar);
+  }
+  if (!msg) { bar.style.display='none'; return; }
+  bar.style.display = 'block';
+  bar.textContent   = msg;
+}
+
+initApp();
 
 /* ────────────────────────────────────────────────────────────────
    SESSION STATE
@@ -16512,17 +16781,37 @@ function setRole(role) {
 }
 
 /** Validates credentials and routes to appropriate screen. */
-function doLogin() {
-  const uid  = document.getElementById('loginUser').value.trim();
-  const pass = document.getElementById('loginPass').value;
+async function doLogin() {
+  const uid   = document.getElementById('loginUser').value.trim();
+  const pass  = document.getElementById('loginPass').value;
   const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
 
-  const users = Store.get('users', []);
-  const user  = users.find(u => u.id === uid && u.pass === pass && u.role === loginRoleMode);
+  let user = null;
 
-  if (!user) {
-    errEl.textContent = 'Incorrect username or password.';
-    return;
+  if (GSheet.isConfigured()) {
+    // Authenticate against Google Sheet Users tab
+    try {
+      errEl.textContent = '⏳ Signing in…';
+      const result = await GSheet.call('login', { id: uid, pass, role: loginRoleMode });
+      if (!result.authenticated) {
+        errEl.textContent = 'Incorrect username or password.';
+        return;
+      }
+      user = result;
+      user.role = loginRoleMode; // ensure role is set
+    } catch(err) {
+      // Sheets unreachable — fall back to local auth
+      console.warn('Sheets auth failed, using local:', err.message);
+      const users = Cache.get('users', []);
+      user = users.find(u => u.id === uid && u.pass === pass && u.role === loginRoleMode);
+      if (!user) { errEl.textContent = 'Incorrect username or password.'; return; }
+    }
+  } else {
+    // Local auth only
+    const users = Cache.get('users', []);
+    user = users.find(u => u.id === uid && u.pass === pass && u.role === loginRoleMode);
+    if (!user) { errEl.textContent = 'Incorrect username or password.'; return; }
   }
 
   currentUser = user;
@@ -16638,18 +16927,24 @@ function addEmployee() {
     createdAt:  new Date().toISOString()
   };
 
-  const emps = Store.get('employees', []);
+  // Save locally first (instant UI)
+  const emps = Cache.get('employees', []);
   emps.push(emp);
-  Store.set('employees', emps);
+  Cache.set('employees', emps);
 
   // Reset form
   ['efFirst','efLast','efDept','efPhone'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('efSupervisor').value = '';
   errEl.textContent = '';
   toggleAddForm();
-
   renderEmployeeList();
   showToast('✅ ' + emp.name + ' added');
+
+  // Sync to Sheets in background
+  if (GSheet.isConfigured()) {
+    GSheet.call('addEmployee', emp)
+      .catch(err => showToast('⚠ Sheets sync failed: ' + err.message, 4000));
+  }
 }
 
 /**
@@ -16699,10 +16994,15 @@ function renderEmployeeList() {
 /** Deletes employee and their attendance records. */
 function deleteEmployee(empId) {
   if (!confirm('Delete this employee and all their attendance data?')) return;
-  Store.set('employees', Store.get('employees', []).filter(e => e.id !== empId));
-  Store.set('attendance', Store.get('attendance', []).filter(r => r.empId !== empId));
+  Cache.set('employees', Cache.get('employees', []).filter(e => e.id !== empId));
+  Cache.set('attendance', Cache.get('attendance', []).filter(r => r.empId !== empId));
   renderEmployeeList();
   showToast('🗑 Employee removed');
+
+  if (GSheet.isConfigured()) {
+    GSheet.call('deleteEmployee', { id: empId })
+      .catch(err => showToast('⚠ Sheets sync failed: ' + err.message, 4000));
+  }
 }
 
 /** Returns human-readable supervisor label for a supervisor ID. */
@@ -17058,13 +17358,19 @@ function confirmAction(type) {
   };
 
   att.push(record);
-  Store.set('attendance', att);
+  Cache.set('attendance', att);
 
   showScanResult(emp, record, [...todayRecs, record], scannedBy);
   renderGuardScans();
   renderSupScans();
 
   if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
+
+  // Sync attendance record to Sheets in background (non-blocking)
+  if (GSheet.isConfigured()) {
+    GSheet.call('addAttendance', record)
+      .catch(err => console.warn('Attendance sync failed:', err.message));
+  }
 }
 
 /** Cancel action picker — go back to scanning without saving anything. */
@@ -17830,26 +18136,39 @@ function printReport() { window.print(); }
    ──────────────────────────────────────────────────────────────── */
 
 function loadSettings() {
-  const s = Store.get('settings', SHIFT_DEFAULT);
-  document.getElementById('sShiftStart').value  = s.start;
-  document.getElementById('sShiftEnd').value    = s.end;
-  document.getElementById('sLunchMins').value   = s.lunchMins;
-  document.getElementById('sExpectedHrs').value = s.expectedHrs;
+  const s = Cache.get('settings', SHIFT_DEFAULT);
+  document.getElementById('sShiftStart').value  = s.start       || SHIFT_DEFAULT.start;
+  document.getElementById('sShiftEnd').value    = s.end         || SHIFT_DEFAULT.end;
+  document.getElementById('sLunchMins').value   = s.lunchMins   ?? SHIFT_DEFAULT.lunchMins;
+  document.getElementById('sExpectedHrs').value = s.expectedHrs ?? SHIFT_DEFAULT.expectedHrs;
   // Load custom team names
-  const n = Store.get('teamNames', { teamA: 'Team A', teamB: 'Team B', teamC: 'Team C' });
-  document.getElementById('sTeamA').value = n.teamA;
-  document.getElementById('sTeamB').value = n.teamB;
-  document.getElementById('sTeamC').value = n.teamC;
+  const n = Cache.get('teamNames', { teamA: 'Team A', teamB: 'Team B', teamC: 'Team C' });
+  document.getElementById('sTeamA').value = n.teamA || 'Team A';
+  document.getElementById('sTeamB').value = n.teamB || 'Team B';
+  document.getElementById('sTeamC').value = n.teamC || 'Team C';
+  // Sheets URL — show config.json URL if present (read-only hint), else show manual
+  const cfgUrl  = APP_CONFIG?.googleSheets?.scriptUrl || '';
+  const manUrl  = Cache.get('apiUrl', '');
+  const urlEl   = document.getElementById('sheetsApiUrl');
+  if (urlEl) urlEl.value = cfgUrl || manUrl || '';
+  updateSheetsStatus();
+
+  // Show config.json summary box
+  renderConfigSummary();
 }
 
 function saveSettings() {
-  Store.set('settings', {
+  const s = {
     start:       document.getElementById('sShiftStart').value   || '09:00',
     end:         document.getElementById('sShiftEnd').value     || '18:30',
     lunchMins:   parseInt(document.getElementById('sLunchMins').value)   || 30,
     expectedHrs: parseFloat(document.getElementById('sExpectedHrs').value) || 9
-  });
+  };
+  Cache.set('settings', s);
   showToast('✅ Settings saved');
+  if (GSheet.isConfigured()) {
+    GSheet.call('saveSettings', s).catch(e => console.warn('Settings sync:', e.message));
+  }
 }
 
 /** Save customized team names and refresh all UI that uses them. */
@@ -17859,12 +18178,13 @@ function saveTeamNames() {
     teamB: document.getElementById('sTeamB').value.trim() || 'Team B',
     teamC: document.getElementById('sTeamC').value.trim() || 'Team C'
   };
-  Store.set('teamNames', names);
-  // Refresh employee form dropdown with new names
+  Cache.set('teamNames', names);
   updateTeamDropdown();
-  // Refresh report filter buttons
   updateReportFilterLabels();
   showToast('✅ Team names saved');
+  if (GSheet.isConfigured()) {
+    GSheet.call('saveTeamNames', names).catch(e => console.warn('TeamNames sync:', e.message));
+  }
 }
 
 /** Returns the display name for a team ID, reading custom names from storage. */
@@ -17915,8 +18235,8 @@ function changeAdminPassword() {
 
 function clearAllAttendance() {
   if (!confirm('Delete ALL attendance records? This cannot be undone.')) return;
-  Store.set('attendance', []);
-  showToast('🗑 All records cleared');
+  Cache.set('attendance', []);
+  showToast('🗑 All local records cleared');
   refreshDashboard();
 }
 
@@ -18161,6 +18481,15 @@ function importCSV() {
   const msg = '✅ Imported ' + added + ' employee' + (added !== 1 ? 's' : '') +
               (skipped ? ' · ' + skipped + ' duplicate(s) skipped' : '');
   showToast(msg, 4000);
+
+  // Bulk sync new employees to Sheets
+  if (GSheet.isConfigured() && added > 0) {
+    const allEmps = Cache.get('employees', []);
+    const newOnes = allEmps.slice(-added); // last N added
+    GSheet.call('importEmployees', { employees: newOnes })
+      .then(() => showToast('☁ Synced to Google Sheets', 2500))
+      .catch(err => showToast('⚠ Sheets bulk sync failed: ' + err.message, 4000));
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -18224,12 +18553,17 @@ function saveEditEmployee() {
     if (r.empId === empId) { r.empName = emps[idx].name; r.dept = emps[idx].dept; }
     return r;
   });
-  Store.set('attendance', att);
-  Store.set('employees', emps);
+  Cache.set('attendance', att);
+  Cache.set('employees', emps);
 
   closeOverlay('editEmpOverlay');
   renderEmployeeList();
   showToast('✅ ' + emps[idx].name + ' updated');
+
+  if (GSheet.isConfigured()) {
+    GSheet.call('updateEmployee', emps[idx])
+      .catch(err => showToast('⚠ Sheets sync failed: ' + err.message, 4000));
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -18339,6 +18673,365 @@ function downloadAllQR() {
       console.error(err);
     }
   }, 100);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DATA EXPORT — writes all localStorage keys to a JSON file
+   ═══════════════════════════════════════════════════════════════ */
+
+/** Exports ALL data: employees, attendance, settings, team names, users */
+function exportAllData() {
+  const backup = {
+    _version:   2,
+    _exported:  new Date().toISOString(),
+    _device:    'Helix Attend',
+    employees:  Store.get('employees',  []),
+    attendance: Store.get('attendance', []),
+    settings:   Store.get('settings',   {}),
+    teamNames:  Store.get('teamNames',  {}),
+    empCounter: Store.get('empCounter', 1000),
+    // Do NOT export users — passwords stay per-device for security
+  };
+
+  const empCount = backup.employees.length;
+  const attCount = backup.attendance.length;
+
+  downloadJSON(backup, 'Helix_AllData_' + new Date().toISOString().slice(0,10) + '.json');
+  showToast('⬇ Exported ' + empCount + ' employees · ' + attCount + ' attendance records', 3500);
+}
+
+/** Exports ONLY employee list — useful for setting up a new device without attendance history */
+function exportEmployeesOnly() {
+  const backup = {
+    _version:    2,
+    _exported:   new Date().toISOString(),
+    _type:       'employees-only',
+    employees:   Store.get('employees',  []),
+    settings:    Store.get('settings',   {}),
+    teamNames:   Store.get('teamNames',  {}),
+    empCounter:  Store.get('empCounter', 1000),
+  };
+
+  downloadJSON(backup, 'Helix_Employees_' + new Date().toISOString().slice(0,10) + '.json');
+  showToast('⬇ Exported ' + backup.employees.length + ' employees', 3000);
+}
+
+/** Helper: triggers browser download of a JSON object as a .json file */
+function downloadJSON(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DATA IMPORT — reads a JSON backup and merges into localStorage
+   Merge strategy:
+     • Employees: merge by ID — add new ones, skip existing IDs
+     • Attendance: merge by record ID — add new, skip existing
+     • Settings / teamNames: overwrite only if not already set locally
+     • empCounter: take the higher value to avoid ID collisions
+   ═══════════════════════════════════════════════════════════════ */
+function importAllData() {
+  const fileInput = document.getElementById('restoreFileInput');
+  const errEl     = document.getElementById('restoreError');
+  errEl.textContent = '';
+
+  if (!fileInput.files.length) {
+    errEl.textContent = 'Please select a backup file first.';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    let backup;
+    try {
+      backup = JSON.parse(e.target.result);
+    } catch(err) {
+      errEl.textContent = '❌ Invalid file — could not parse JSON.';
+      return;
+    }
+
+    // Basic validation
+    if (!backup.employees && !backup.attendance) {
+      errEl.textContent = '❌ File does not appear to be a Helix Attend backup.';
+      return;
+    }
+
+    let empAdded = 0, empSkipped = 0, attAdded = 0, attSkipped = 0;
+
+    // ── Merge employees ──
+    if (Array.isArray(backup.employees)) {
+      const existing   = Store.get('employees', []);
+      const existingIds = new Set(existing.map(function(e) { return e.id; }));
+
+      backup.employees.forEach(function(emp) {
+        if (existingIds.has(emp.id)) {
+          empSkipped++;
+        } else {
+          existing.push(emp);
+          existingIds.add(emp.id);
+          empAdded++;
+        }
+      });
+      Store.set('employees', existing);
+    }
+
+    // ── Merge attendance ──
+    if (Array.isArray(backup.attendance)) {
+      const existing    = Store.get('attendance', []);
+      const existingIds = new Set(existing.map(function(r) { return r.id; }));
+
+      backup.attendance.forEach(function(rec) {
+        if (!existingIds.has(rec.id)) {
+          existing.push(rec);
+          existingIds.add(rec.id);
+          attAdded++;
+        } else {
+          attSkipped++;
+        }
+      });
+      Store.set('attendance', existing);
+    }
+
+    // ── Settings: only import if local is default/empty ──
+    if (backup.settings && Object.keys(backup.settings).length) {
+      const local = Store.get('settings', null);
+      if (!local) Store.set('settings', backup.settings);
+    }
+
+    // ── Team names: only import if not yet customised locally ──
+    if (backup.teamNames && Object.keys(backup.teamNames).length) {
+      const local = Store.get('teamNames', null);
+      if (!local) Store.set('teamNames', backup.teamNames);
+    }
+
+    // ── empCounter: take highest to prevent ID collisions ──
+    if (backup.empCounter) {
+      const local = Store.get('empCounter', 1000);
+      if (backup.empCounter > local) Store.set('empCounter', backup.empCounter);
+    }
+
+    // Reset file input
+    fileInput.value = '';
+
+    // Refresh UI
+    renderEmployeeList();
+    refreshDashboard();
+    loadSettings();
+
+    const msg = '✅ Import complete: ' +
+      empAdded + ' employees added' +
+      (empSkipped  ? ', ' + empSkipped  + ' already existed' : '') +
+      (attAdded    ? ' · ' + attAdded + ' attendance records added' : '');
+    errEl.style.color = '#059669';
+    errEl.textContent  = msg;
+    showToast(msg, 4500);
+  };
+
+  reader.readAsText(fileInput.files[0]);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GOOGLE SHEETS MANAGEMENT FUNCTIONS
+   ═══════════════════════════════════════════════════════════════ */
+
+/** Save the Apps Script URL and show connection status */
+function saveSheetsUrl() {
+  const url = document.getElementById('sheetsApiUrl').value.trim();
+  const el  = document.getElementById('sheetsTestResult');
+  if (!url) { el.textContent = 'Please enter a URL.'; el.style.color='#dc2626'; return; }
+  if (!url.includes('script.google.com')) {
+    el.textContent = '⚠ URL should be a script.google.com address.';
+    el.style.color = '#d97706'; 
+    // Allow saving anyway in case of custom proxy
+  }
+  Cache.set('apiUrl', url);
+  el.textContent = '✅ URL saved. Press Test Connection to verify.';
+  el.style.color = '#059669';
+  updateSheetsStatus();
+}
+
+/** Clear the Sheets URL (revert to local-only mode) */
+function clearSheetsUrl() {
+  if (!confirm('Disconnect from Google Sheets? The app will use local storage only.')) return;
+  Cache.del('apiUrl');
+  document.getElementById('sheetsApiUrl').value = '';
+  document.getElementById('sheetsTestResult').textContent = 'Disconnected — using local storage.';
+  document.getElementById('sheetsTestResult').style.color = '#6b7280';
+  updateSheetsStatus();
+}
+
+/** Test the connection by calling getAll and showing result */
+async function testSheetsConnection() {
+  const el = document.getElementById('sheetsTestResult');
+  el.textContent = '⏳ Testing…';
+  el.style.color = '#d97706';
+
+  if (!GSheet.isConfigured()) {
+    el.textContent = '⚠ No URL saved yet. Enter URL and press Save first.';
+    el.style.color = '#dc2626';
+    return;
+  }
+
+  try {
+    const all = await GSheet.get('getAll');
+    const empCount = Array.isArray(all.employees) ? all.employees.length : '?';
+    el.textContent = '✅ Connected! Found ' + empCount + ' employee(s) in Google Sheet.';
+    el.style.color = '#059669';
+    // Refresh local cache with Sheets data
+    if (Array.isArray(all.employees)) Cache.set('employees', all.employees);
+    renderEmployeeList();
+  } catch(err) {
+    el.textContent = '❌ Connection failed: ' + err.message + ' — check URL and deployment settings.';
+    el.style.color = '#dc2626';
+  }
+}
+
+/** Push everything in local cache up to Sheets (one-time migration) */
+async function pushLocalToSheets() {
+  if (!GSheet.isConfigured()) {
+    showToast('⚠ Configure Sheets URL first'); return;
+  }
+  if (!confirm('Push all local employees and settings to Google Sheets?')) return;
+
+  const el = document.getElementById('sheetsTestResult');
+  el.textContent = '⏳ Pushing data to Sheets…';
+  el.style.color = '#d97706';
+
+  try {
+    const payload = {
+      employees:  Cache.get('employees',  []),
+      settings:   Cache.get('settings',   {}),
+      teamNames:  Cache.get('teamNames',  {}),
+    };
+    const result = await GSheet.call('importAll', payload);
+    const empResult = result.employees || {};
+    el.textContent = '✅ Pushed! ' + (empResult.added||0) + ' employees added, ' + (empResult.skipped||0) + ' already existed.';
+    el.style.color = '#059669';
+    showToast('☁ Local data pushed to Google Sheets!', 3500);
+  } catch(err) {
+    el.textContent = '❌ Push failed: ' + err.message;
+    el.style.color = '#dc2626';
+  }
+}
+
+/** Pull latest data from Sheets into local cache */
+async function pullSheetsToLocal() {
+  if (!GSheet.isConfigured()) {
+    showToast('⚠ Configure Sheets URL first'); return;
+  }
+  const el = document.getElementById('sheetsTestResult');
+  el.textContent = '⏳ Pulling from Sheets…';
+  el.style.color = '#d97706';
+
+  try {
+    const all = await GSheet.get('getAll');
+    if (Array.isArray(all.employees)) Cache.set('employees', all.employees);
+    if (all.settings && Object.keys(all.settings).length) {
+      Cache.set('settings', { ...SHIFT_DEFAULT, ...all.settings });
+    }
+    if (all.teamNames) Cache.set('teamNames', all.teamNames);
+
+    renderEmployeeList();
+    loadSettings();
+    refreshDashboard();
+
+    el.textContent = '✅ Pulled ' + (all.employees||[]).length + ' employees from Sheets.';
+    el.style.color = '#059669';
+    showToast('⬇ Data pulled from Google Sheets!', 3000);
+  } catch(err) {
+    el.textContent = '❌ Pull failed: ' + err.message;
+    el.style.color = '#dc2626';
+  }
+}
+
+/** Update the Sheets status banner in settings */
+function updateSheetsStatus() {
+  const banner = document.getElementById('sheetsStatusBanner');
+  if (!banner) return;
+
+  if (GSheet.isConfigured()) {
+    banner.style.background = '#d1fae5';
+    banner.style.color      = '#065f46';
+    banner.textContent      = '☁ Connected — all data syncs to Google Sheets';
+  } else {
+    banner.style.background = '#fef3c7';
+    banner.style.color      = '#78350f';
+    banner.textContent      = '💾 Local mode — data stored on this device only';
+  }
+
+  // Show where the URL is coming from
+  const srcBanner = document.getElementById('configSourceBanner');
+  if (!srcBanner) return;
+  const cfgUrl = APP_CONFIG?.googleSheets?.scriptUrl;
+  if (cfgUrl && cfgUrl.includes('script.google.com')) {
+    srcBanner.style.display = 'block';
+    srcBanner.innerHTML     = '📄 <strong>URL loaded from config.json</strong> — edit that file on Netlify to change it for all devices. Manual entry below is overridden by config.json.';
+  } else if (Cache.get('apiUrl')) {
+    srcBanner.style.display = 'block';
+    srcBanner.innerHTML     = '⚙ <strong>URL set manually on this device</strong> — add <code>scriptUrl</code> to config.json to sync across all devices automatically.';
+  } else {
+    srcBanner.style.display = 'none';
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CONFIG.JSON SUMMARY — shown in Settings so admin can see
+   exactly what values were loaded from the remote config file.
+   ═══════════════════════════════════════════════════════════════ */
+
+/**
+ * Renders a read-only summary of the current config.json values
+ * inside the Settings page so the admin knows what's loaded.
+ */
+function renderConfigSummary() {
+  // Find or create the summary container inside the Sheets card
+  let box = document.getElementById('configJsonSummary');
+  if (!box) return; // container added in HTML below
+
+  if (!APP_CONFIG || Object.keys(APP_CONFIG).length === 0) {
+    box.innerHTML = '<span style="color:#6b7280;font-size:12px">⚠ config.json not loaded — file may be missing from deployment.</span>';
+    box.style.display = 'block';
+    return;
+  }
+
+  const cfg  = APP_CONFIG;
+  const url  = cfg?.googleSheets?.scriptUrl || '(not set)';
+  const sid  = cfg?.googleSheets?.sheetId   || '(not set)';
+  const sh   = cfg?.shift || {};
+  const tm   = cfg?.teams || {};
+  const ver  = cfg?.version || '—';
+
+  const urlShort = url.length > 50 ? url.slice(0,48) + '…' : url;
+
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#1e40af;margin-bottom:10px">
+      📄 config.json — currently loaded values
+      <span style="float:right;font-weight:400;color:#6b7280">v${ver}</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      ${row('Apps Script URL', '<code style="word-break:break-all;font-size:11px">' + urlShort + '</code>', url !== '(not set)' ? '#d1fae5' : '#fef3c7')}
+      ${row('Sheet ID',        '<code>' + sid + '</code>')}
+      ${row('Shift',           sh.start + ' – ' + sh.end + ' (' + sh.expectedHrs + 'h, ' + sh.lunchMins + 'min lunch)')}
+      ${row('Teams',           (tm.teamA||'A') + ' · ' + (tm.teamB||'B') + ' · ' + (tm.teamC||'C'))}
+    </table>
+    <div style="margin-top:10px;font-size:11px;color:#6b7280;line-height:1.6">
+      ✏️ To change any value: edit <strong>config.json</strong> on Netlify → <em>Deploys → your site → edit file</em> or push via Git.
+      All devices pick up the new values within seconds on next load.
+    </div>`;
+
+  function row(label, val, bg) {
+    return '<tr style="background:' + (bg||'transparent') + '">' +
+      '<td style="padding:5px 8px;color:#374151;font-weight:600;width:36%;border-bottom:1px solid #e2e8f0">' + label + '</td>' +
+      '<td style="padding:5px 8px;color:#1e293b;border-bottom:1px solid #e2e8f0">' + val + '</td></tr>';
+  }
 }
 
 </script>
