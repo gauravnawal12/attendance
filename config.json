@@ -7,7 +7,7 @@
   "version": "2.0",
 
   "googleSheets": {
-    "scriptUrl": "https://script.google.com/macros/s/AKfycbzFIvejUHLMh4aTXV_HjNigGi5tWCQAJkSWD6TAEnmIJliDUocRzCkt5nyB_nRovnU5tQ/exec",
+    "scriptUrl": "https://script.google.com/macros/s/AKfycbxGrsUiwjiH-LjI8CYgxcyhZ5pctGOZMcvnFp7lrQxrvHkdGOuQzIDfw_cSK2vhjA9EIg/exec",
     "sheetId": "19QONqKdcHk02KjZCik1uAdQoqN3VbDAnBlu_Ps6o13Q",
     "_note": "scriptUrl = Apps Script Web App URL (https://script.google.com/macros/s/.../exec). sheetId = the long ID in the Sheet URL."
   },
