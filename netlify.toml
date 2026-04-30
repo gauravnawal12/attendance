@@ -1,0 +1,21 @@
+# Netlify configuration for Helix Attend
+# This file must be in the root of your deployment
+
+[build]
+  # No build step needed — static files only
+  publish = "."
+  functions = "netlify/functions"
+
+[[redirects]]
+  # Proxy all /api/* requests to the Netlify function
+  # This keeps the URL clean: /api?action=getAll instead of /.netlify/functions/api?action=getAll
+  from = "/api"
+  to   = "/.netlify/functions/api"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Allow the PWA to be embedded and accessed cross-origin
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"

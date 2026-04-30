@@ -1,0 +1,40 @@
+{
+  "_comment": "Helix Industries — Attendance System Configuration",
+  "_instructions": "Edit this file to update settings across ALL devices instantly. Deploy alongside index.html on Netlify.",
+
+  "appName": "Helix Attend",
+  "companyName": "Helix Industries",
+  "version": "2.0",
+
+  "googleSheets": {
+    "scriptUrl": "",
+    "sheetId": "",
+    "_note": "scriptUrl = Apps Script Web App URL (https://script.google.com/macros/s/.../exec). sheetId = the long ID in the Sheet URL."
+  },
+
+  "shift": {
+    "start": "09:00",
+    "end": "18:30",
+    "lunchMins": 30,
+    "expectedHrs": 9
+  },
+
+  "teams": {
+    "teamA": "Team A",
+    "teamB": "Team B",
+    "teamC": "Team C"
+  },
+
+  "users": {
+    "_note": "Passwords here override the defaults on every device on next load. Change these after initial setup.",
+    "admin":      { "pass": "admin123" },
+    "guard":      { "pass": "guard123" },
+    "supervisor": { "pass": "sup123"   }
+  },
+
+  "features": {
+    "allowGuardCheckout": true,
+    "autoLunchDeduct": true,
+    "requireInternet": false
+  }
+}
