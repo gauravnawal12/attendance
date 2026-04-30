@@ -125,13 +125,29 @@ const GSheet = {
    * @returns {Promise<any>}
    */
   async call(action, body = {}) {
-    // Apps Script CORS only works reliably with GET requests from external origins.
-    // We encode the payload as a URL-safe base64 string in a 'payload' query param.
     const url = this.url();
     if (!url) throw new Error('API not configured — set scriptUrl in config.json or Settings');
-    const payload = btoa(unescape(encodeURIComponent(JSON.stringify(body))));
-    const qs      = 'action=' + encodeURIComponent(action) + '&payload=' + encodeURIComponent(payload);
-    const resp    = await fetch(url + '?' + qs, { redirect: 'follow' });
+
+    const bodyJson   = JSON.stringify(body);
+    const bodyB64    = btoa(unescape(encodeURIComponent(bodyJson)));
+    const isLarge    = bodyB64.length > 3000; // threshold: switch to POST above 3KB
+
+    let resp;
+    if (!isLarge) {
+      // Small payload — GET with base64 in URL (no CORS preflight)
+      const qs = 'action=' + encodeURIComponent(action) + '&payload=' + encodeURIComponent(bodyB64);
+      resp = await fetch(url + '?' + qs, { redirect: 'follow' });
+    } else {
+      // Large payload — POST with form-encoded body (no CORS preflight for this content-type)
+      const form = 'action=' + encodeURIComponent(action) + '&payload=' + encodeURIComponent(bodyB64);
+      resp = await fetch(url, {
+        method:   'POST',
+        headers:  { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body:     form,
+        redirect: 'follow'
+      });
+    }
+
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const json = await resp.json();
     if (!json.ok) throw new Error(json.error || 'API error');
@@ -2512,23 +2528,42 @@ async function pushLocalToSheets() {
   if (!GSheet.isConfigured()) {
     showToast('⚠ Configure Sheets URL first'); return;
   }
-  if (!confirm('Push all local employees and settings to Google Sheets?')) return;
+
+  const employees = Cache.get('employees', []);
+  const settings  = Cache.get('settings',  {});
+  const teamNames = Cache.get('teamNames', {});
+
+  if (!confirm('Push ' + employees.length + ' employee(s) and settings to Google Sheets?')) return;
 
   const el = document.getElementById('sheetsTestResult');
-  el.textContent = '⏳ Pushing data to Sheets…';
   el.style.color = '#d97706';
 
   try {
-    const payload = {
-      employees:  Cache.get('employees',  []),
-      settings:   Cache.get('settings',   {}),
-      teamNames:  Cache.get('teamNames',  {}),
-    };
-    const result = await GSheet.call('importAll', payload);
-    const empResult = result.employees || {};
-    el.textContent = '✅ Pushed! ' + (empResult.added||0) + ' employees added, ' + (empResult.skipped||0) + ' already existed.';
+    // ── Step 1: Push settings and team names (small, single call) ──
+    el.textContent = '⏳ Pushing settings…';
+    await GSheet.call('saveSettings', settings);
+    await GSheet.call('saveTeamNames', teamNames);
+
+    // ── Step 2: Push employees in batches of 10 to stay under URL/payload limits ──
+    const BATCH = 10;
+    let totalAdded = 0, totalSkipped = 0;
+
+    for (let i = 0; i < employees.length; i += BATCH) {
+      const batch = employees.slice(i, i + BATCH);
+      const batchNum = Math.floor(i / BATCH) + 1;
+      const totalBatches = Math.ceil(employees.length / BATCH);
+      el.textContent = '⏳ Pushing employees… batch ' + batchNum + ' of ' + totalBatches +
+                       ' (' + Math.min(i + BATCH, employees.length) + '/' + employees.length + ')';
+
+      const result = await GSheet.call('importEmployees', { employees: batch });
+      totalAdded   += result.added   || 0;
+      totalSkipped += result.skipped || 0;
+    }
+
+    el.textContent = '✅ Done! ' + totalAdded + ' employee(s) added, ' + totalSkipped + ' already existed in Sheet.';
     el.style.color = '#059669';
-    showToast('☁ Local data pushed to Google Sheets!', 3500);
+    showToast('☁ All data pushed to Google Sheets!', 3500);
+
   } catch(err) {
     el.textContent = '❌ Push failed: ' + err.message;
     el.style.color = '#dc2626';
