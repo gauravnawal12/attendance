@@ -301,47 +301,77 @@ async function doLogin() {
   const errEl = document.getElementById('loginError');
   errEl.textContent = '';
 
+  // Always ensure default users exist in cache before trying to auth
+  // This guards against initApp not having finished yet
+  ensureDefaultUsers();
+
   let user = null;
 
-  if (GSheet.isConfigured()) {
-    // Authenticate against Google Sheet Users tab
-    try {
-      errEl.textContent = '⏳ Signing in…';
-      const result = await GSheet.call('login', { id: uid, pass, role: loginRoleMode });
-      if (!result.authenticated) {
-        errEl.textContent = 'Incorrect username or password.';
-        return;
-      }
-      user = result;
-      user.role = loginRoleMode; // ensure role is set
-    } catch(err) {
-      // Sheets unreachable — fall back to local auth
-      console.warn('Sheets auth failed, using local:', err.message);
-      const users = Cache.get('users', []);
-      user = users.find(u => u.id === uid && u.pass === pass && u.role === loginRoleMode);
-      if (!user) { errEl.textContent = 'Incorrect username or password.'; return; }
-    }
-  } else {
-    // Local auth only
-    const users = Cache.get('users', []);
-    user = users.find(u => u.id === uid && u.pass === pass && u.role === loginRoleMode);
-    if (!user) { errEl.textContent = 'Incorrect username or password.'; return; }
+  // ── Step 1: Always try local cache first (fast, works offline) ──
+  const cachedUsers = Cache.get('users', []);
+  user = cachedUsers.find(u => u.id === uid && u.pass === pass && u.role === loginRoleMode);
+
+  if (user) {
+    // Local auth succeeded — no need to hit Sheets
+    proceedAfterLogin(user, errEl);
+    return;
   }
 
+  // ── Step 2: If Sheets configured, try Sheets auth (handles password changes via Sheet) ──
+  if (GSheet.isConfigured()) {
+    try {
+      errEl.textContent = '⏳ Verifying…';
+      const result = await GSheet.call('login', { id: uid, pass, role: loginRoleMode });
+      if (result && result.authenticated) {
+        user = { ...result, role: loginRoleMode };
+        // Update local cache with this validated user
+        const users = Cache.get('users', []);
+        const existing = users.find(u => u.id === uid);
+        if (existing) { existing.pass = pass; Cache.set('users', users); }
+        proceedAfterLogin(user, errEl);
+        return;
+      }
+    } catch(err) {
+      console.warn('Sheets auth error:', err.message);
+      // Fall through to show error
+    }
+  }
+
+  // ── Both failed ──
+  errEl.textContent = 'Incorrect username or password.';
+}
+
+/** Ensures the three default users always exist in local cache. */
+function ensureDefaultUsers() {
+  let users = Cache.get('users', []);
+  const defaults = [
+    { id: 'admin',      pass: 'admin123', role: 'admin',      name: 'Administrator' },
+    { id: 'guard',      pass: 'guard123', role: 'guard',      name: 'Gate Guard'    },
+    { id: 'supervisor', pass: 'sup123',   role: 'supervisor', name: 'Supervisor', label: 'Supervisor' }
+  ];
+  let changed = false;
+  defaults.forEach(def => {
+    if (!users.find(u => u.id === def.id)) {
+      users.push(def);
+      changed = true;
+    }
+  });
+  if (changed) Cache.set('users', users);
+}
+
+/** Handles everything after a successful login (routing, UI setup). */
+function proceedAfterLogin(user, errEl) {
   currentUser = user;
-  errEl.textContent = '';
+  if (errEl) errEl.textContent = '';
   document.getElementById('loginUser').value = '';
   document.getElementById('loginPass').value = '';
 
-  // Route to the correct screen
-  // After login: ensure employee list is fresh from Sheets
-  // This is the key fix — Guard/Supervisor get employees even with empty local cache
+  // Refresh employees from Sheets in background (non-blocking)
   if (GSheet.isConfigured()) {
     GSheet.get('getEmployees')
       .then(fresh => {
         if (Array.isArray(fresh) && fresh.length) {
           Cache.set('employees', fresh);
-          // Refresh any UI that's already showing
           if (typeof renderEmployeeList === 'function') renderEmployeeList();
           if (typeof renderSupTeam      === 'function') renderSupTeam();
         }
@@ -349,18 +379,19 @@ async function doLogin() {
       .catch(e => console.warn('Post-login employee refresh failed:', e.message));
   }
 
+  // Route to correct screen based on role
   if (user.role === 'admin') {
-    document.getElementById('adminAvatar').textContent = user.name[0].toUpperCase();
+    document.getElementById('adminAvatar').textContent = (user.name || 'A')[0].toUpperCase();
     showScreen('adminScreen');
     refreshDashboard();
   } else if (user.role === 'guard') {
-    document.getElementById('guardAvatar').textContent = user.name[0].toUpperCase();
+    document.getElementById('guardAvatar').textContent = (user.name || 'G')[0].toUpperCase();
     showScreen('guardScreen');
     renderGuardScans();
   } else if (user.role === 'supervisor') {
-    document.getElementById('supAvatar').textContent = user.name[0].toUpperCase();
-    document.getElementById('supRoleBadge').textContent = user.label || user.name;
-    document.getElementById('supScanHeading').textContent = 'Scanner — ' + (user.label || user.name);
+    document.getElementById('supAvatar').textContent = (user.name || 'S')[0].toUpperCase();
+    document.getElementById('supRoleBadge').textContent = user.label || user.name || 'Supervisor';
+    document.getElementById('supScanHeading').textContent = 'Scanner — ' + (user.label || user.name || 'Supervisor');
     showScreen('supervisorScreen');
     renderSupScans();
     renderSupTeam();
