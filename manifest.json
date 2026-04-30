@@ -1,5 +1,5 @@
 {
-  "name": "Helix Attend — Helix Industries",
+  "name": "Helix Attend \u2014 Helix Industries",
   "short_name": "Helix Attend",
   "description": "QR-based workforce attendance system for Helix Industries",
   "start_url": "./index.html",
@@ -21,6 +21,9 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["business", "productivity"],
+  "categories": [
+    "business",
+    "productivity"
+  ],
   "lang": "en-IN"
 }
