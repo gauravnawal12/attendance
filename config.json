@@ -29,7 +29,7 @@
     "_note": "Passwords here override the defaults on every device on next load. Change these after initial setup.",
     "admin":      { "pass": "Hipladmin123" },
     "guard":      { "pass": "guard123" },
-    "sup"  :      { "pass": "sup123"   }
+    "supervisor"  :      { "pass": "sup123"   }
   },
 
   "features": {
