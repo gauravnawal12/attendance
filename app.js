@@ -1,4 +1,3 @@
-
 /* ────────────────────────────────────────────────────────────────
    CONSTANTS & SHIFT CONFIG
    ──────────────────────────────────────────────────────────────── */
@@ -222,6 +221,21 @@ async function initApp() {
       const localEmps = Cache.get('employees', []);
       if (sheetEmps.length > 0) {
         Cache.set('employees', sheetEmps);
+
+        // ── CRITICAL: Sync empCounter to highest existing EMP number ──
+        // This prevents new employees getting IDs that already exist in the Sheet.
+        // Extract the numeric part of each EMP ID (e.g. EMP1043 → 1043) and take the max.
+        const maxId = sheetEmps.reduce(function(max, emp) {
+          const num = parseInt((emp.id || '').replace(/[^0-9]/g, ''), 10);
+          return (!isNaN(num) && num > max) ? num : max;
+        }, 1000);
+
+        const localCounter = Cache.get('empCounter', 1000);
+        if (maxId > localCounter) {
+          Cache.set('empCounter', maxId);
+          console.log('empCounter synced to', maxId);
+        }
+
       } else if (localEmps.length > 0) {
         // Sheet empty but local has data — push local to Sheet silently
         GSheet.call('importEmployees', { employees: localEmps })
@@ -495,8 +509,9 @@ function addEmployee() {
 
   if (!first) { errEl.textContent = 'First name is required.'; return; }
 
-  const counter = Store.get('empCounter', 1000) + 1;
-  Store.set('empCounter', counter);
+  // Generate next ID — empCounter is kept in sync with Sheet on every app load
+  const counter = Cache.get('empCounter', 1000) + 1;
+  Cache.set('empCounter', counter);
 
   const emp = {
     id:         'EMP' + counter,
@@ -576,14 +591,32 @@ function renderEmployeeList() {
 /** Deletes employee and their attendance records. */
 function deleteEmployee(empId) {
   if (!confirm('Delete this employee and all their attendance data?')) return;
-  Cache.set('employees', Cache.get('employees', []).filter(e => e.id !== empId));
-  Cache.set('attendance', Cache.get('attendance', []).filter(r => r.empId !== empId));
+
+  // Remove from local cache
+  Cache.set('employees', Cache.get('employees', []).filter(function(e) { return e.id !== empId; }));
+  Cache.set('attendance', Cache.get('attendance', []).filter(function(r) { return r.empId !== empId; }));
   renderEmployeeList();
   showToast('🗑 Employee removed');
 
   if (GSheet.isConfigured()) {
     GSheet.call('deleteEmployee', { id: empId })
-      .catch(err => showToast('⚠ Sheets sync failed: ' + err.message, 4000));
+      .then(function() {
+        // After deletion confirmed on Sheet, re-pull fresh list to ensure local is in sync
+        return GSheet.get('getEmployees');
+      })
+      .then(function(fresh) {
+        if (Array.isArray(fresh)) {
+          Cache.set('employees', fresh);
+          // Re-sync counter after any deletion
+          const maxId = fresh.reduce(function(max, emp) {
+            const num = parseInt((emp.id || '').replace(/[^0-9]/g, ''), 10);
+            return (!isNaN(num) && num > max) ? num : max;
+          }, 1000);
+          if (maxId > Cache.get('empCounter', 1000)) Cache.set('empCounter', maxId);
+          renderEmployeeList();
+        }
+      })
+      .catch(function(err) { showToast('⚠ Sheets sync failed: ' + err.message, 4000); });
   }
 }
 
@@ -2506,6 +2539,14 @@ async function testSheetsConnection() {
     // Use Push (⬆) to send local data to Sheet, or Pull (⬇) to replace local with Sheet.
     if (Array.isArray(all.employees) && sheetEmpCount > localEmpCount) {
       Cache.set('employees', all.employees);
+
+      // Sync empCounter to prevent duplicate IDs
+      const maxId = all.employees.reduce(function(max, emp) {
+        const num = parseInt((emp.id || '').replace(/[^0-9]/g, ''), 10);
+        return (!isNaN(num) && num > max) ? num : max;
+      }, 1000);
+      if (maxId > Cache.get('empCounter', 1000)) Cache.set('empCounter', maxId);
+
       renderEmployeeList();
       el.textContent += ' — local cache updated from Sheet.';
     } else if (sheetEmpCount === 0 && localEmpCount > 0) {
@@ -2582,7 +2623,16 @@ async function pullSheetsToLocal() {
 
   try {
     const all = await GSheet.get('getAll');
-    if (Array.isArray(all.employees)) Cache.set('employees', all.employees);
+    if (Array.isArray(all.employees)) {
+      Cache.set('employees', all.employees);
+
+      // Sync empCounter to prevent duplicate IDs after pull
+      const maxId = all.employees.reduce(function(max, emp) {
+        const num = parseInt((emp.id || '').replace(/[^0-9]/g, ''), 10);
+        return (!isNaN(num) && num > max) ? num : max;
+      }, 1000);
+      if (maxId > Cache.get('empCounter', 1000)) Cache.set('empCounter', maxId);
+    }
     if (all.settings && Object.keys(all.settings).length) {
       Cache.set('settings', { ...SHIFT_DEFAULT, ...all.settings });
     }
@@ -2683,4 +2733,3 @@ function renderConfigSummary() {
       '<td style="padding:5px 8px;color:#1e293b;border-bottom:1px solid #e2e8f0">' + val + '</td></tr>';
   }
 }
-
