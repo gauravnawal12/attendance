@@ -1,3 +1,4 @@
+
 /* ────────────────────────────────────────────────────────────────
    CONSTANTS & SHIFT CONFIG
    ──────────────────────────────────────────────────────────────── */
@@ -81,18 +82,35 @@ async function loadRemoteConfig() {
       }
     }
 
-    // 4. User passwords — allows central password rotation via config.json
-    if (APP_CONFIG?.users) {
+    // 4. User credentials — config.json can change both username (id) and password
+    //    The role key (admin/guard/supervisor) is the stable identifier — never the username.
+    //    This means you can rename 'admin' → 'gaurav' and 'guard' → 'gate' freely in config.json.
+    if (APP_CONFIG && APP_CONFIG.users) {
       const existing = Cache.get('users', []);
       let changed = false;
-      Object.entries(APP_CONFIG.users).forEach(([uid, cfg]) => {
-        const user = existing.find(u => u.id === uid);
-        if (user && cfg.pass && user.pass !== cfg.pass) {
+
+      Object.entries(APP_CONFIG.users).forEach(function([roleKey, cfg]) {
+        if (roleKey === '_note') return; // skip the comment field
+        // Find user by ROLE (stable), not by current id (which may be changing)
+        const user = existing.find(function(u) { return u.role === roleKey; });
+        if (!user) return;
+
+        // Apply new username if provided and different
+        if (cfg.id && cfg.id !== user.id) {
+          user.id  = cfg.id;
+          changed  = true;
+        }
+        // Apply new password if provided and different
+        if (cfg.pass && cfg.pass !== user.pass) {
           user.pass = cfg.pass;
           changed   = true;
         }
       });
-      if (changed) Cache.set('users', existing);
+
+      if (changed) {
+        Cache.set('users', existing);
+        console.log('User credentials updated from config.json');
+      }
     }
 
     console.log('✅ config.json loaded:', APP_CONFIG.version || '');
@@ -1794,7 +1812,7 @@ function loadSettings() {
   document.getElementById('sTeamB').value = n.teamB || 'Team B';
   document.getElementById('sTeamC').value = n.teamC || 'Team C';
   // Sheets URL — show config.json URL if present (read-only hint), else show manual
-  const cfgUrl  = APP_CONFIG?.googleSheets?.scriptUrl || '';
+  const cfgUrl  = (APP_CONFIG && APP_CONFIG.googleSheets && APP_CONFIG.googleSheets.scriptUrl) || '';
   const manUrl  = Cache.get('apiUrl', '');
   const urlEl   = document.getElementById('sheetsApiUrl');
   if (urlEl) urlEl.value = cfgUrl || manUrl || '';
@@ -1802,6 +1820,9 @@ function loadSettings() {
 
   // Show config.json summary box
   renderConfigSummary();
+
+  // Load current usernames into credentials form
+  loadCredentials();
 }
 
 function saveSettings() {
@@ -1864,21 +1885,75 @@ function updateReportFilterLabels() {
   if (btnC) btnC.textContent = n.teamC;
 }
 
-function changeAdminPassword() {
-  const np   = document.getElementById('sNewPass').value;
-  const cp   = document.getElementById('sConfPass').value;
-  const errEl = document.getElementById('sPassError');
-  if (!np || np.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
-  if (np !== cp)             { errEl.textContent = 'Passwords do not match.'; return; }
-  const users = Store.get('users', []);
-  const admin = users.find(u => u.id === 'admin');
-  if (admin) admin.pass = np;
-  Store.set('users', users);
-  errEl.textContent = '';
-  document.getElementById('sNewPass').value = '';
-  document.getElementById('sConfPass').value = '';
-  showToast('🔐 Password updated');
+function loadCredentials() {
+  const users = Cache.get('users', []);
+  const map = { admin: 'uAdminId', guard: 'uGuardId', supervisor: 'uSupId' };
+  Object.entries(map).forEach(function([role, elId]) {
+    const user = users.find(function(u) { return u.role === role; });
+    const el   = document.getElementById(elId);
+    if (el && user) el.value = user.id;
+  });
+  ['uAdminPass','uGuardPass','uSupPass'].forEach(function(id) {
+    var el = document.getElementById(id); if (el) el.value = '';
+  });
 }
+
+function saveAllCredentials() {
+  const errEl = document.getElementById('sPassError');
+  errEl.style.color = '#dc2626';
+  errEl.textContent = '';
+
+  const fields = [
+    { role:'admin',      idEl:'uAdminId', passEl:'uAdminPass', label:'Admin' },
+    { role:'guard',      idEl:'uGuardId', passEl:'uGuardPass', label:'Guard' },
+    { role:'supervisor', idEl:'uSupId',   passEl:'uSupPass',   label:'Supervisor' }
+  ];
+
+  const updates = fields.map(function(f) {
+    return {
+      role:    f.role,
+      label:   f.label,
+      newId:   (document.getElementById(f.idEl).value   || '').trim().toLowerCase(),
+      newPass: (document.getElementById(f.passEl).value || '').trim()
+    };
+  });
+
+  // Validate
+  for (var i = 0; i < updates.length; i++) {
+    var u = updates[i];
+    if (!u.newId) { errEl.textContent = u.label + ' username cannot be empty.'; return; }
+    if (u.newPass && u.newPass.length < 6) {
+      errEl.textContent = u.label + ' password must be at least 6 characters.'; return;
+    }
+  }
+  var ids = updates.map(function(u) { return u.newId; });
+  if (new Set(ids).size !== ids.length) {
+    errEl.textContent = 'Each role must have a unique username.'; return;
+  }
+
+  // Apply
+  var users = Cache.get('users', []);
+  updates.forEach(function(u) {
+    var user = users.find(function(usr) { return usr.role === u.role; });
+    if (!user) { users.push({ id: u.newId, pass: u.newPass || 'changeme', role: u.role, name: u.label }); }
+    else { user.id = u.newId; if (u.newPass) user.pass = u.newPass; }
+  });
+  Cache.set('users', users);
+
+  ['uAdminPass','uGuardPass','uSupPass'].forEach(function(id) {
+    var el = document.getElementById(id); if (el) el.value = '';
+  });
+  errEl.style.color = '#059669';
+  errEl.textContent = '✅ Saved. Use new credentials on next login.';
+  showToast('🔐 Credentials updated', 3000);
+
+  // Sync to Sheets
+  if (GSheet.isConfigured()) {
+    GSheet.call('updateUsers', { users: users })
+      .catch(function(e) { console.warn('User sync to Sheets failed:', e.message); });
+  }
+}
+
 
 function clearAllAttendance() {
   if (!confirm('Delete ALL attendance records? This cannot be undone.')) return;
@@ -2733,3 +2808,4 @@ function renderConfigSummary() {
       '<td style="padding:5px 8px;color:#1e293b;border-bottom:1px solid #e2e8f0">' + val + '</td></tr>';
   }
 }
+
