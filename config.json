@@ -26,10 +26,19 @@
   },
 
   "users": {
-    "_note": "Passwords here override the defaults on every device on next load. Change these after initial setup.",
-    "admin":      { "pass": "Hipladmin123" },
-    "guard":      { "pass": "guard123" },
-    "supervisor"  :      { "pass": "sup123"   }
+    "_note": "Change id (username) and/or pass (password) for any role. All devices pick up the change on next load. Role keys (admin/guard/supervisor) must stay as-is.",
+    "admin": {
+      "id": "admin",
+      "pass": "HIPLadmin123"
+    },
+    "guard": {
+      "id": "gate",
+      "pass": "guard123"
+    },
+    "supervisor": {
+      "id": "sup",
+      "pass": "sup123"
+    }
   },
 
   "features": {
