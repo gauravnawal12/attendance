@@ -294,6 +294,63 @@ async function initApp() {
   } else {
     showGlobalStatus('');
   }
+
+  // ── Step 4: Restore previous session if one exists ──
+  // Guard and Supervisor sessions are persisted across refreshes.
+  // If a saved session is found, skip the login screen entirely.
+  restoreSession();
+}
+
+/**
+ * restoreSession — checks localStorage for a saved guard/supervisor session.
+ * If found and still valid (user still exists in cache), logs them straight in.
+ * Admin sessions are never restored — admin must always login manually.
+ */
+function restoreSession() {
+  const session = Cache.get('session', null);
+  if (!session || !session.role || !session.id) return; // No saved session
+
+  // Only restore guard and supervisor — not admin
+  if (session.role !== 'guard' && session.role !== 'supervisor') return;
+
+  // Verify the user still exists in the users list (guards against deleted/renamed accounts)
+  const users = Cache.get('users', []);
+  const user  = users.find(function(u) { return u.id === session.id && u.role === session.role; });
+  if (!user) {
+    // User no longer valid — clear stale session
+    Cache.del('session');
+    return;
+  }
+
+  console.log('Session restored for:', user.id, '(' + user.role + ')');
+
+  // Route directly to correct screen — no login needed
+  currentUser = user;
+  if (user.role === 'guard') {
+    document.getElementById('guardAvatar').textContent = (user.name || 'G')[0].toUpperCase();
+    showScreen('guardScreen');
+    renderGuardScans();
+  } else if (user.role === 'supervisor') {
+    document.getElementById('supAvatar').textContent   = (user.name || 'S')[0].toUpperCase();
+    document.getElementById('supRoleBadge').textContent    = user.label || user.name || 'Supervisor';
+    document.getElementById('supScanHeading').textContent  = 'Scanner — ' + (user.label || user.name || 'Supervisor');
+    showScreen('supervisorScreen');
+    renderSupScans();
+    renderSupTeam();
+  }
+
+  // Refresh employee list in background after session restore
+  if (GSheet.isConfigured()) {
+    GSheet.get('getEmployees')
+      .then(function(fresh) {
+        if (Array.isArray(fresh) && fresh.length) {
+          Cache.set('employees', fresh);
+          if (typeof renderEmployeeList === 'function') renderEmployeeList();
+          if (typeof renderSupTeam      === 'function') renderSupTeam();
+        }
+      })
+      .catch(function(e) { console.warn('Session restore employee refresh:', e.message); });
+  }
 }
 
 /** Dismissible status bar shown at top of app */
@@ -420,6 +477,13 @@ function proceedAfterLogin(user, errEl) {
   document.getElementById('loginUser').value = '';
   document.getElementById('loginPass').value = '';
 
+  // ── Persist session so page refresh / browser restart keeps user logged in ──
+  // Admin is intentionally excluded — admin should always re-authenticate
+  // Guard and Supervisor stay logged in indefinitely until manual Logout
+  if (user.role === 'guard' || user.role === 'supervisor') {
+    Cache.set('session', { id: user.id, role: user.role, name: user.name, label: user.label || '' });
+  }
+
   // Refresh employees from Sheets in background (non-blocking)
   if (GSheet.isConfigured()) {
     GSheet.get('getEmployees')
@@ -457,6 +521,7 @@ function logout() {
   guardStopScanner();
   supStopScanner();
   currentUser = null;
+  Cache.del('session');   // Clear persisted session on explicit logout
   showScreen('loginScreen');
 }
 
